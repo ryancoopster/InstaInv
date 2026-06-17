@@ -13,6 +13,9 @@ const upsertSchema = z.object({
   phone: z.string().trim().optional().nullable(),
   accountNo: z.string().trim().optional().nullable(),
   notes: z.string().trim().optional().nullable(),
+  // Live price fetching config (see src/lib/pricing/).
+  priceFetchEnabled: z.boolean().optional(),
+  priceParser: z.enum(["generic", "mouser", "mcmaster"]).optional().nullable(),
 });
 
 export const GET = route(async () => {
@@ -37,6 +40,8 @@ export const POST = route(async (req: Request) => {
       phone: data.phone || null,
       accountNo: data.accountNo || null,
       notes: data.notes || null,
+      priceFetchEnabled: data.priceFetchEnabled ?? false,
+      priceParser: data.priceParser ?? null,
       sortOrder: (max._max.sortOrder ?? 0) + 1,
     },
   });

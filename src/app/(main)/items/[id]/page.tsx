@@ -2,12 +2,14 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { prisma } from "@/lib/prisma";
-import { requirePermission } from "@/lib/auth";
+import { can, requirePermission } from "@/lib/auth";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ItemForm } from "@/components/items/item-form";
+import { ItemPricePanel } from "@/components/pricing/item-price-panel";
 import { itemInclude, serializeItem } from "@/app/api/items/_serialize";
 import type { ItemRow, BoxOption, CustomFieldDef } from "@/components/items/types";
+import type { PriceFetchStatus } from "@/lib/pricing/types";
 
 export const dynamic = "force-dynamic";
 
@@ -76,6 +78,9 @@ export default async function ItemDetailPage({ params }: PageProps) {
     })) as unknown as CustomFieldDef[];
   }
 
+  // Only users who can manage pricing see the live-pricing controls.
+  const canManagePricing = await can("pricing.manage");
+
   return (
     <div className="space-y-6">
       <BackHeader title={item.name} description={item.partNumber ? `Part ${item.partNumber}` : undefined} />
@@ -86,6 +91,26 @@ export default async function ItemDetailPage({ params }: PageProps) {
         boxes={boxes}
         initialFields={initialFields}
       />
+      {canManagePricing && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Pricing</h2>
+            <p className="text-sm text-muted-foreground">
+              Fetch the current price from this item&apos;s supplier link and optionally apply it to
+              the recorded cost.
+            </p>
+          </div>
+          <ItemPricePanel
+            itemId={item.id}
+            purchaseCost={item.purchaseCost}
+            lastFetchedPrice={itemRaw.lastFetchedPrice ? itemRaw.lastFetchedPrice.toString() : null}
+            priceUpdatedAt={itemRaw.priceUpdatedAt ? itemRaw.priceUpdatedAt.toISOString() : null}
+            priceFetchStatus={(itemRaw.priceFetchStatus as PriceFetchStatus | null) ?? null}
+            priceFetchError={itemRaw.priceFetchError ?? null}
+            supplierLink={item.supplierLink}
+          />
+        </section>
+      )}
     </div>
   );
 }

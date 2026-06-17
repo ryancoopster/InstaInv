@@ -47,6 +47,8 @@ model User {
   userType     UserType  @relation(fields: [userTypeId], references: [id])
   // Per-user overrides of permissionKey -> boolean. Overrides the UserType value.
   permissionOverrides Json @default("{}")
+  // Per-user dashboard layout (widgets, order, size, visibility). Null = use default.
+  dashboardConfig Json?
   sortOrder    Int       @default(0)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
@@ -83,6 +85,10 @@ model Supplier {
   phone       String?
   accountNo   String?
   notes       String?
+  // Live price fetching: enable scraping product links for this supplier and which
+  // parser strategy to use (see src/lib/pricing/). e.g. "mcmaster" | "generic" | "jsonld".
+  priceFetchEnabled Boolean @default(false)
+  priceParser       String?
   sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -248,17 +254,41 @@ model Item {
   binId           String?
   bin             Bin?     @relation(fields: [binId], references: [id], onDelete: SetNull)
 
+  // Live pricing: most recently fetched price from the supplier link + metadata.
+  lastFetchedPrice Decimal?  @db.Decimal(12, 4)
+  priceUpdatedAt   DateTime?
+  priceSource      String?   // host/parser that produced the price
+  priceFetchStatus String?   // "ok" | "error" | "pending" | "unsupported"
+  priceFetchError  String?
+
   sortOrder       Int      @default(0)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   orderRequests   OrderRequest[]
+  priceHistory    PriceHistory[]
 
   @@index([categoryId])
   @@index([drawerId])
   @@index([binId])
   @@index([supplierId])
   @@index([name])
+}
+
+// Time series of fetched prices, one row per fetch attempt (success or failure).
+model PriceHistory {
+  id        String   @id @default(cuid())
+  itemId    String
+  item      Item     @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  price     Decimal? @db.Decimal(12, 4)
+  currency  String   @default("USD")
+  source    String?  // host/parser
+  success   Boolean  @default(true)
+  note      String?
+  fetchedAt DateTime @default(now())
+
+  @@index([itemId])
+  @@index([fetchedAt])
 }
 
 // ---------------------------------------------------------------------------

@@ -56,6 +56,8 @@ export interface SupplierRow {
   phone: string | null;
   accountNo: string | null;
   notes: string | null;
+  priceFetchEnabled?: boolean;
+  priceParser?: string | null;
   sortOrder: number;
   _count?: { items: number };
 }
@@ -101,6 +103,11 @@ export interface ItemRow {
   binId: string | null;
   bin: BinRef | null;
   sortOrder: number;
+  // Live-pricing fields. Optional because the items list doesn't preload them;
+  // they're populated client-side by an on-demand "refresh price" action.
+  lastFetchedPrice?: string | null;
+  priceUpdatedAt?: string | null;
+  priceFetchStatus?: import("@/lib/pricing/types").PriceFetchStatus | null;
 }
 
 // Light option types for select inputs in forms.

@@ -13,6 +13,8 @@ const patchSchema = z.object({
   phone: z.string().trim().optional().nullable(),
   accountNo: z.string().trim().optional().nullable(),
   notes: z.string().trim().optional().nullable(),
+  priceFetchEnabled: z.boolean().optional(),
+  priceParser: z.enum(["generic", "mouser", "mcmaster"]).optional().nullable(),
 });
 
 type Params = { params: { id: string } };
@@ -36,6 +38,8 @@ export const PATCH = route(async (req: Request, { params }: Params) => {
       ...(data.phone !== undefined ? { phone: data.phone || null } : {}),
       ...(data.accountNo !== undefined ? { accountNo: data.accountNo || null } : {}),
       ...(data.notes !== undefined ? { notes: data.notes || null } : {}),
+      ...(data.priceFetchEnabled !== undefined ? { priceFetchEnabled: data.priceFetchEnabled } : {}),
+      ...(data.priceParser !== undefined ? { priceParser: data.priceParser } : {}),
     },
   });
 

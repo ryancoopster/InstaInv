@@ -12,6 +12,7 @@ import {
   Users,
   ShieldCheck,
   Smartphone,
+  DollarSign,
   type LucideIcon,
 } from "lucide-react";
 import type { PermissionKey } from "@/lib/permissions";
@@ -48,6 +49,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Mobile View", href: "/m", icon: Smartphone, group: "Tools" },
 
   // --- Administration ---
+  { label: "Pricing", href: "/admin/pricing", icon: DollarSign, permission: "pricing.manage", group: "Administration" },
   { label: "Users", href: "/admin/users", icon: Users, permission: "users.view", group: "Administration" },
   { label: "Roles", href: "/admin/roles", icon: ShieldCheck, permission: "users.manage", group: "Administration" },
 ];

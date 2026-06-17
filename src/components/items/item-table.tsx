@@ -12,9 +12,12 @@ import {
   ArrowUp,
   ArrowDown,
   ImageIcon,
+  RefreshCw,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { cn, formatNumber, reorderQty, applySort } from "@/lib/utils";
+import { cn, formatNumber, formatCurrency, reorderQty, applySort } from "@/lib/utils";
+import { PriceStatusDot } from "@/components/pricing/price-status";
+import type { ApplyFetchResult } from "@/lib/pricing/types";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
@@ -75,6 +78,7 @@ export function ItemTable({
   const canEdit = can("items.edit");
   const canCreate = can("items.create");
   const canAdjust = can("items.adjustQuantity");
+  const canPricing = can("pricing.manage");
 
   const [items, setItems] = React.useState<ItemRow[]>(initialItems);
   const [query, setQuery] = React.useState(initialQuery);
@@ -84,6 +88,7 @@ export function ItemTable({
   const [sortDir, setSortDir] = React.useState<"asc" | "desc">("asc");
   const [newOpen, setNewOpen] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
+  const [pricingBusyId, setPricingBusyId] = React.useState<string | null>(null);
 
   React.useEffect(() => setItems(initialItems), [initialItems]);
 
@@ -163,6 +168,31 @@ export function ItemTable({
     } catch (err) {
       setItems((rows) => rows.map((r) => (r.id === item.id ? item : r)));
       toast.error(err instanceof ApiError ? err.message : "Adjust failed");
+    }
+  }
+
+  async function refreshPrice(item: ItemRow) {
+    setPricingBusyId(item.id);
+    try {
+      const result = await api.post<ApplyFetchResult>(`/api/pricing/items/${item.id}/refresh`, {});
+      setItems((rows) =>
+        rows.map((r) =>
+          r.id === item.id
+            ? {
+                ...r,
+                lastFetchedPrice: result.lastFetchedPrice,
+                priceUpdatedAt: result.priceUpdatedAt,
+                priceFetchStatus: result.priceFetchStatus,
+              }
+            : r,
+        ),
+      );
+      if (result.success) toast.success(`Price updated for "${item.name}"`);
+      else toast.warning(result.note ?? "No price found");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Refresh failed");
+    } finally {
+      setPricingBusyId(null);
     }
   }
 
@@ -272,6 +302,7 @@ export function ItemTable({
                 <SortHead label="Part #" active={sortKey === "partNumber"} dir={sortDir} onClick={() => toggleSort("partNumber")} />
                 <SortHead label="Category" active={sortKey === "categoryName"} dir={sortDir} onClick={() => toggleSort("categoryName")} />
                 <SortHead label="Supplier" active={sortKey === "supplierName"} dir={sortDir} onClick={() => toggleSort("supplierName")} />
+                {canPricing && <TableHead>Price</TableHead>}
                 <TableHead>Location</TableHead>
                 <SortHead label="Qty" align="right" active={sortKey === "quantity"} dir={sortDir} onClick={() => toggleSort("quantity")} />
                 <SortHead label="Desired" align="right" active={sortKey === "desiredQuantity"} dir={sortDir} onClick={() => toggleSort("desiredQuantity")} />
@@ -343,6 +374,36 @@ export function ItemTable({
                       <TableCell className="text-muted-foreground">
                         {item.supplier?.name || "—"}
                       </TableCell>
+                      {canPricing && (
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            {item.lastFetchedPrice != null ? (
+                              <span className="inline-flex items-center gap-1 tabular-nums">
+                                <PriceStatusDot status={item.priceFetchStatus} />
+                                {formatCurrency(item.lastFetchedPrice)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-6 w-6"
+                              aria-label="Refresh price"
+                              title="Refresh price"
+                              disabled={pricingBusyId === item.id}
+                              onClick={() => refreshPrice(item)}
+                            >
+                              <RefreshCw
+                                className={cn(
+                                  "h-3 w-3",
+                                  pricingBusyId === item.id && "animate-spin",
+                                )}
+                              />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      )}
                       <TableCell className="max-w-[14rem] truncate text-muted-foreground">
                         {location || <span className="italic">Unassigned</span>}
                       </TableCell>

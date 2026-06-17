@@ -10,6 +10,8 @@ const nextConfig = {
   // tesseract.js / bwip-js etc. should stay external to the server bundle.
   experimental: {
     serverComponentsExternalPackages: ["tesseract.js", "bwip-js", "exceljs", "pdf-lib", "bcryptjs"],
+    // Enables src/instrumentation.ts (used to start the background price-fetch scheduler).
+    instrumentationHook: true,
   },
   // Allow large image/scan uploads to server actions / route handlers.
   async headers() {

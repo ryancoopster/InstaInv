@@ -12,6 +12,7 @@ export type PermissionKey =
   | "items.edit"
   | "items.delete"
   | "items.adjustQuantity"
+  | "pricing.manage"
   | "categories.view"
   | "categories.manage"
   | "suppliers.view"
@@ -47,6 +48,7 @@ export const PERMISSIONS: PermissionMeta[] = [
   { key: "items.edit", group: "Inventory", label: "Edit items", description: "Edit item details and fields." },
   { key: "items.delete", group: "Inventory", label: "Delete items", description: "Remove items." },
   { key: "items.adjustQuantity", group: "Inventory", label: "Adjust quantity", description: "Change current on-hand counts (inventory taking)." },
+  { key: "pricing.manage", group: "Inventory", label: "Manage pricing", description: "Refresh prices from supplier links and configure auto price fetching." },
   { key: "categories.view", group: "Categories", label: "View categories", description: "See categories and custom fields." },
   { key: "categories.manage", group: "Categories", label: "Manage categories", description: "Create/edit categories and custom field definitions." },
   { key: "suppliers.view", group: "Suppliers", label: "View suppliers", description: "See suppliers/vendors." },
@@ -124,6 +126,7 @@ export function presetManager(): Record<string, boolean> {
     "items.create": true,
     "items.edit": true,
     "items.delete": true,
+    "pricing.manage": true,
     "categories.manage": true,
     "suppliers.manage": true,
     "boxes.manage": true,

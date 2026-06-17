@@ -10,9 +10,11 @@ import {
   RefreshCw,
   PackageSearch,
   Plus,
+  LayoutGrid,
+  Rows3,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, cn } from "@/lib/utils";
 import { usePermissions } from "@/components/shell/permission-context";
 import {
   Card,
@@ -34,8 +36,21 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { toast } from "@/components/ui/toast";
 import { ManualEntryForm } from "@/components/orders/manual-entry-form";
+import { BuyListCondensed } from "@/components/orders/buy-list-condensed";
 import type { ItemOption, SupplierOption } from "@/components/orders/request-form";
 import type { BuyList as BuyListData, BuyListSource } from "@/components/orders/buy-list-types";
+
+// Persisted view mode for the buy list. "grouped" = the card/group view,
+// "condensed" = the dense spreadsheet table. Stored in localStorage so the
+// chosen mode sticks across reloads.
+type ViewMode = "grouped" | "condensed";
+const VIEW_MODE_KEY = "instainv:buy-list:view-mode";
+
+function readViewMode(): ViewMode {
+  if (typeof window === "undefined") return "grouped";
+  const v = window.localStorage.getItem(VIEW_MODE_KEY);
+  return v === "condensed" || v === "grouped" ? v : "grouped";
+}
 
 const SOURCE_LABEL: Record<BuyListSource, { label: string; variant: "outline" | "secondary" | "warning" }> = {
   STOCK_SHORTFALL: { label: "Shortfall", variant: "warning" },
@@ -56,6 +71,23 @@ export function BuyList({
   const [data, setData] = React.useState<BuyListData>(initial);
   const [loading, setLoading] = React.useState(false);
   const [markingGroup, setMarkingGroup] = React.useState<string | null>(null);
+
+  // View mode persisted in localStorage. Start with the SSR-safe default
+  // ("grouped") to keep the server and first client render identical, then
+  // hydrate the stored preference in an effect to avoid a hydration mismatch.
+  const [viewMode, setViewMode] = React.useState<ViewMode>("grouped");
+  React.useEffect(() => {
+    setViewMode(readViewMode());
+  }, []);
+
+  const changeViewMode = React.useCallback((mode: ViewMode) => {
+    setViewMode(mode);
+    try {
+      window.localStorage.setItem(VIEW_MODE_KEY, mode);
+    } catch {
+      // localStorage may be unavailable (private mode / SSR) — ignore.
+    }
+  }, []);
 
   const canGenerate = can("orders.setDesired") || can("orders.approve");
   const canMark = can("orders.markOrdered");
@@ -122,6 +154,43 @@ export function BuyList({
           <Badge variant="outline">{data.manualCount} manual</Badge>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          {/* View toggle: grouped cards vs. condensed spreadsheet. */}
+          <div
+            className="inline-flex items-center rounded-md border border-border p-0.5"
+            role="group"
+            aria-label="Buy list view"
+          >
+            <button
+              type="button"
+              onClick={() => changeViewMode("grouped")}
+              aria-pressed={viewMode === "grouped"}
+              title="Grouped view"
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
+                viewMode === "grouped"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Grouped
+            </button>
+            <button
+              type="button"
+              onClick={() => changeViewMode("condensed")}
+              aria-pressed={viewMode === "condensed"}
+              title="Condensed spreadsheet view"
+              className={cn(
+                "inline-flex h-7 items-center gap-1.5 rounded-sm px-2.5 text-xs font-medium transition-colors",
+                viewMode === "condensed"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <Rows3 className="h-3.5 w-3.5" />
+              Condensed
+            </button>
+          </div>
           <Button variant="ghost" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCw className={loading ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
             Refresh
@@ -162,6 +231,8 @@ export function BuyList({
           title="Nothing to buy"
           description="No stock shortfalls, approved requests, or manual entries right now. Set desired stock levels or approve requests to populate the buy list."
         />
+      ) : viewMode === "condensed" ? (
+        <BuyListCondensed data={data} />
       ) : (
         <>
           {data.groups.map((group) => {
