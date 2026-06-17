@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: instainv
+      POSTGRES_PASSWORD: instainv
+      POSTGRES_DB: instainv
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U instainv"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: "postgresql://instainv:instainv@db:5432/instainv?schema=public"
+      AUTH_SECRET: "dev-only-secret-change-me-in-production-please-32+"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      APP_NAME: "InstaInv"
+      STORAGE_DRIVER: "local"
+      UPLOAD_DIR: "public/uploads"
+      OCR_LANG: "eng"
+      SEED_ADMIN_EMAIL: "admin@instainv.local"
+      SEED_ADMIN_PASSWORD: "admin1234"
+    ports:
+      - "3000:3000"
+    volumes:
+      - uploads:/app/public/uploads
+
+volumes:
+  db_data:
+  uploads:

@@ -1,0 +1,356 @@
+// InstaInv data model.
+// Single source of truth for the whole app. Every feature builds against this.
+//
+// Conventions:
+//  - Every user-orderable table has an Int `sortOrder` for manual drag ordering.
+//    The UI may also apply a "definable sort" (by any column) that overrides the
+//    manual order at view time; manual order is the persisted default.
+//  - `customValues` / `*Config` / `permissions` JSON columns hold flexible data.
+//  - Soft references to images are stored as URL/path strings (local or S3).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Auth & permissions
+// ---------------------------------------------------------------------------
+
+model UserType {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  // True grants every permission regardless of the map below.
+  isAdmin     Boolean  @default(false)
+  // Map of permissionKey -> boolean. See src/lib/permissions.ts for the registry.
+  permissions Json     @default("{}")
+  isSystem    Boolean  @default(false) // built-in types can't be deleted
+  sortOrder   Int      @default(0)
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  image        String?
+  isActive     Boolean   @default(true)
+  userTypeId   String
+  userType     UserType  @relation(fields: [userTypeId], references: [id])
+  // Per-user overrides of permissionKey -> boolean. Overrides the UserType value.
+  permissionOverrides Json @default("{}")
+  sortOrder    Int       @default(0)
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  orderRequests      OrderRequest[] @relation("requestedBy")
+  approvedRequests   OrderRequest[] @relation("approvedBy")
+  activityLogs       ActivityLog[]
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // e.g. "item.update", "order.approve"
+  entity    String?  // e.g. "Item"
+  entityId  String?
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// Suppliers
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  website     String?
+  email       String?
+  phone       String?
+  accountNo   String?
+  notes       String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items         Item[]
+  orderRequests OrderRequest[]
+}
+
+// ---------------------------------------------------------------------------
+// Categories & custom fields
+// ---------------------------------------------------------------------------
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  color       String?  // hex for UI chips
+  icon        String?  // lucide icon name
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children    Category[] @relation("CategoryTree")
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customFields CustomFieldDef[]
+  items        Item[]
+
+  @@unique([parentId, name])
+}
+
+enum CustomFieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  BOOLEAN
+  SELECT
+  MULTISELECT
+  DATE
+  URL
+}
+
+// A custom attribute attached to all items in a category, e.g. hardware -> thread size.
+model CustomFieldDef {
+  id          String          @id @default(cuid())
+  categoryId  String
+  category    Category        @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String          // label shown in UI
+  key         String          // stable key used inside Item.customValues
+  type        CustomFieldType @default(TEXT)
+  options     Json            @default("[]") // for SELECT / MULTISELECT
+  unit        String?         // e.g. "mm", "in"
+  required    Boolean         @default(false)
+  showOnLabel Boolean         @default(false)
+  sortOrder   Int             @default(0)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  @@unique([categoryId, key])
+}
+
+// ---------------------------------------------------------------------------
+// Boxes, drawers, bins (physical layout)
+// ---------------------------------------------------------------------------
+
+model Box {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  location    String?  // where the box physically lives
+  imageUrl    String?
+  // Front-view layout grid for the graphical view.
+  gridRows    Int      @default(4)
+  gridCols    Int      @default(1)
+  // Auto-generated content summary (refreshed when contents change).
+  summary     String?
+  labelConfig Json?    // optional override of the default box label template
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  drawers Drawer[]
+}
+
+model Drawer {
+  id          String   @id @default(cuid())
+  boxId       String
+  box         Box      @relation(fields: [boxId], references: [id], onDelete: Cascade)
+  name        String
+  label       String?  // short label text (e.g. "A1")
+  // Position in the box front-view grid.
+  gridRow     Int      @default(0)
+  gridCol     Int      @default(0)
+  rowSpan     Int      @default(1)
+  colSpan     Int      @default(1)
+  // Internal bin layout grid for the "virtual drawer" view.
+  binRows     Int      @default(2)
+  binCols     Int      @default(4)
+  color       String?
+  summary     String?
+  labelConfig Json?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  bins  Bin[]
+  items Item[]
+
+  @@index([boxId])
+}
+
+model Bin {
+  id        String   @id @default(cuid())
+  drawerId  String
+  drawer    Drawer   @relation(fields: [drawerId], references: [id], onDelete: Cascade)
+  name      String?
+  // Position/size within the drawer bin grid.
+  gridRow   Int      @default(0)
+  gridCol   Int      @default(0)
+  rowSpan   Int      @default(1)
+  colSpan   Int      @default(1)
+  color     String?
+  labelConfig Json?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items Item[]
+
+  @@index([drawerId])
+}
+
+// ---------------------------------------------------------------------------
+// Items (the core inventory record)
+// ---------------------------------------------------------------------------
+
+model Item {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  partNumber      String?
+  sku             String?
+  barcode         String?
+  purchaseCost    Decimal  @default(0) @db.Decimal(12, 4)
+  unit            String?  // "ea", "box", "ft"...
+  quantity        Int      @default(0)        // current on-hand
+  desiredQuantity Int      @default(0)        // target to keep stocked
+  minQuantity     Int      @default(0)        // reorder threshold
+  imageUrl        String?
+
+  supplierId      String?
+  supplier        Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  supplierLink    String?   // direct product URL (overrides supplier website)
+
+  categoryId      String?
+  category        Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  // Values for the category's custom fields, keyed by CustomFieldDef.key.
+  customValues    Json     @default("{}")
+
+  // Physical location.
+  drawerId        String?
+  drawer          Drawer?  @relation(fields: [drawerId], references: [id], onDelete: SetNull)
+  binId           String?
+  bin             Bin?     @relation(fields: [binId], references: [id], onDelete: SetNull)
+
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  orderRequests   OrderRequest[]
+
+  @@index([categoryId])
+  @@index([drawerId])
+  @@index([binId])
+  @@index([supplierId])
+  @@index([name])
+}
+
+// ---------------------------------------------------------------------------
+// Ordering workflow
+// ---------------------------------------------------------------------------
+
+enum OrderRequestStatus {
+  REQUESTED   // user asked for it / admin flagged a shortfall
+  APPROVED    // admin approved -> appears on the buy list
+  ORDERED     // admin placed the order
+  RECEIVED    // arrived & stock updated
+  REJECTED
+}
+
+enum OrderRequestSource {
+  USER_REQUEST     // raised by a user in the request area
+  STOCK_SHORTFALL  // generated from desired vs current
+  ADMIN_MANUAL     // admin bulk-entry
+}
+
+model OrderRequest {
+  id            String   @id @default(cuid())
+  // Either references an existing item, or carries free-text for a new item.
+  itemId        String?
+  item          Item?    @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  freeName      String?
+  freePartNumber String?
+  freeSupplier  String?
+
+  supplierId    String?
+  supplier      Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  quantity      Int      @default(1)
+  unitCost      Decimal? @db.Decimal(12, 4)
+  note          String?
+
+  status        OrderRequestStatus @default(REQUESTED)
+  source        OrderRequestSource @default(USER_REQUEST)
+
+  requestedById String?
+  requestedBy   User?    @relation("requestedBy", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedById  String?
+  approvedBy    User?    @relation("approvedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  approvedAt    DateTime?
+  orderedAt     DateTime?
+  receivedAt    DateTime?
+
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([supplierId])
+  @@index([itemId])
+}
+
+// ---------------------------------------------------------------------------
+// Label templates (designer output)
+// ---------------------------------------------------------------------------
+
+enum LabelTarget {
+  ITEM
+  BIN
+  DRAWER
+  BOX
+  GENERIC
+}
+
+model LabelTemplate {
+  id          String      @id @default(cuid())
+  name        String
+  target      LabelTarget @default(BIN)
+  // Tape / media geometry in millimetres.
+  widthMm     Float       @default(62)
+  heightMm    Float       @default(29)
+  tapeName    String?     // e.g. "Brother DK-1201 29x90"
+  orientation String      @default("landscape")
+  // Canvas document: { elements: [...], background, dpi }. See CONTRACT.md.
+  content     Json        @default("{}")
+  isDefault   Boolean     @default(false)
+  sortOrder   Int         @default(0)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// App settings (singleton-ish key/value)
+// ---------------------------------------------------------------------------
+
+model Setting {
+  key       String   @id
+  value     Json     @default("{}")
+  updatedAt DateTime @updatedAt
+}
