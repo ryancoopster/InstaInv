@@ -52,7 +52,13 @@ export function DrawerDetailClient({
     setBins(drawer.bins);
     setItems(drawer.items);
     setSummary(drawer.summary);
-  }, [drawer.id, drawer.bins, drawer.items, drawer.summary]);
+    // VD-4: depend only on drawer.id so navigating to a different drawer
+    // re-seeds local state, but a background router.refresh() of the SAME drawer
+    // (which yields new array identities every render) no longer clobbers
+    // in-flight optimistic bin/item edits. Trade-off: external edits by another
+    // user won't appear until navigation — acceptable for this single-editor view.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drawer.id]);
 
   function applyAdjust(itemId: string, quantity: number) {
     setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, quantity } : i)));

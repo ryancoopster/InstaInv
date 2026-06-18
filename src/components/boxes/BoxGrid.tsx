@@ -79,11 +79,14 @@ export function BoxGrid({ initialBoxes, canManage, unassignedCount = 0 }: BoxGri
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = boxes.findIndex((b) => b.id === active.id);
-    const newIndex = boxes.findIndex((b) => b.id === over.id);
+    // BG-1: compute indices against `view` (which owns the rendered DnD ids and
+    // their order) rather than `boxes`, keeping the rendered list and persisted
+    // order in lockstep regardless of `boxes`' internal ordering.
+    const oldIndex = view.findIndex((b) => b.id === active.id);
+    const newIndex = view.findIndex((b) => b.id === over.id);
     if (oldIndex < 0 || newIndex < 0) return;
 
-    const next = arrayMove(boxes, oldIndex, newIndex).map((b, i) => ({ ...b, sortOrder: i }));
+    const next = arrayMove(view, oldIndex, newIndex).map((b, i) => ({ ...b, sortOrder: i }));
     setBoxes(next);
     try {
       await api.patch("/api/boxes/reorder", { ids: next.map((b) => b.id) });

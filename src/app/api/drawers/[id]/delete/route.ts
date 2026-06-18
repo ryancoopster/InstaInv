@@ -65,10 +65,45 @@ export const POST = route(async (req: Request, ctx: Ctx) => {
       if (body.migrateBins && body.targetDrawerId) {
         // Move bins (with their items) into the target drawer, then move the
         // remaining (binless) items, then delete the now-empty source drawer.
-        await tx.bin.updateMany({
-          where: { drawerId: drawer.id },
-          data: { drawerId: body.targetDrawerId },
+        // DM-8: re-pack migrated bins below the target drawer's existing bins so
+        // their source grid coordinates can't collide with (overlap) bins
+        // already in the target. We append each migrated bin in its own row,
+        // preserving its rowSpan/colSpan, and grow the target's grid to fit.
+        const targetBins = await tx.bin.findMany({
+          where: { drawerId: body.targetDrawerId },
+          select: { gridRow: true, rowSpan: true },
         });
+        const sourceBins = await tx.bin.findMany({
+          where: { drawerId: drawer.id },
+          select: { id: true, gridCol: true, rowSpan: true, colSpan: true },
+          orderBy: [{ gridRow: "asc" }, { gridCol: "asc" }],
+        });
+        let nextRow = targetBins.reduce((max, b) => Math.max(max, b.gridRow + b.rowSpan), 0);
+        let maxCol = 0;
+        for (const b of sourceBins) {
+          await tx.bin.update({
+            where: { id: b.id },
+            data: { drawerId: body.targetDrawerId, gridRow: nextRow, gridCol: 0 },
+          });
+          maxCol = Math.max(maxCol, b.colSpan);
+          nextRow += b.rowSpan;
+        }
+        // Bump the target drawer's grid so the re-packed bins are visible.
+        if (sourceBins.length > 0) {
+          const targetDrawer = await tx.drawer.findUnique({
+            where: { id: body.targetDrawerId },
+            select: { binRows: true, binCols: true },
+          });
+          if (targetDrawer) {
+            await tx.drawer.update({
+              where: { id: body.targetDrawerId },
+              data: {
+                binRows: Math.max(targetDrawer.binRows, nextRow),
+                binCols: Math.max(targetDrawer.binCols, maxCol),
+              },
+            });
+          }
+        }
         await tx.item.updateMany({
           where: { drawerId: drawer.id },
           data: { boxId: body.targetBoxId, drawerId: body.targetDrawerId },

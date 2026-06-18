@@ -28,7 +28,7 @@ import {
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/toast";
-import { BinChip, type TileField } from "./BinChip";
+import { BinChip, type TileField, type BinChipAction } from "./BinChip";
 import { AssignToBoxDialog } from "./AssignToBoxDialog";
 import { BinMoveDialog } from "./BinMoveDialog";
 import { COLOR_SWATCHES, type BinDetail, type DrawerItem, type DrawerFieldDef } from "./types";
@@ -97,10 +97,20 @@ export function VirtualDrawer({
     [customFieldDefs],
   );
   const [selectedFieldKeys, setSelectedFieldKeys] = React.useState<string[]>(["partNumber", "quantity"]);
+  const allTileFieldsRef = React.useRef(allTileFields);
+  allTileFieldsRef.current = allTileFields;
   React.useEffect(() => {
     try {
       const saved = window.localStorage.getItem(TILE_FIELDS_STORAGE_KEY);
-      if (saved) setSelectedFieldKeys(JSON.parse(saved));
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      // VD-1: the value can be valid JSON of the wrong shape (null/number/object),
+      // which would later crash .includes/.filter — only accept a string[].
+      if (!Array.isArray(parsed) || !parsed.every((x) => typeof x === "string")) return;
+      // VD-7: drop stale keys (e.g. removed custom: fields) so they don't
+      // accumulate in storage; standard keys always survive the intersection.
+      const known = new Set(allTileFieldsRef.current.map((f) => f.key));
+      setSelectedFieldKeys(parsed.filter((k) => known.has(k)));
     } catch {
       /* ignore */
     }
@@ -122,6 +132,34 @@ export function VirtualDrawer({
   const [activeItem, setActiveItem] = React.useState<DrawerItem | null>(null);
   const [ctx, setCtx] = React.useState<{ item: DrawerItem; x: number; y: number } | null>(null);
   const [assignItem, setAssignItem] = React.useState<DrawerItem | null>(null);
+
+  // VD-3: keep the right-click menu fully on-screen and add an Escape/keyboard
+  // path. (The always-available kebab on each chip provides the primary
+  // accessible path; this menu is a mouse convenience.)
+  const ctxMenuRef = React.useRef<HTMLDivElement>(null);
+  const [ctxPos, setCtxPos] = React.useState<{ top: number; left: number } | null>(null);
+  React.useLayoutEffect(() => {
+    if (!ctx) {
+      setCtxPos(null);
+      return;
+    }
+    const el = ctxMenuRef.current;
+    const menuW = el?.offsetWidth ?? 192; // min-w-[12rem]
+    const menuH = el?.offsetHeight ?? 0;
+    const PAD = 8;
+    const left = Math.max(PAD, Math.min(ctx.x, window.innerWidth - menuW - PAD));
+    const top = Math.max(PAD, Math.min(ctx.y, window.innerHeight - menuH - PAD));
+    setCtxPos({ top, left });
+    el?.focus();
+  }, [ctx]);
+  React.useEffect(() => {
+    if (!ctx) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtx(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [ctx]);
 
   // Local grid size so we can auto-grow it (kept in sync with props).
   const [rows, setRows] = React.useState(binRows);
@@ -206,19 +244,51 @@ export function VirtualDrawer({
   }
 
   async function relocateOut(itemId: string, body: Record<string, unknown>, msg: string) {
-    const snapshot = items;
+    // VD-5: capture only the removed item so a failure rolls back surgically via
+    // a functional updater, instead of restoring a stale whole-array snapshot
+    // that would clobber concurrent optimistic edits.
+    const removed = items.find((i) => i.id === itemId);
+    if (!removed) return;
     setItems((prev) => prev.filter((i) => i.id !== itemId));
     try {
       await api.post("/api/items/move", { itemId, ...body });
       toast.success(msg);
       onChanged();
     } catch (err) {
-      setItems(() => snapshot);
+      setItems((prev) => (prev.some((i) => i.id === itemId) ? prev : [...prev, removed]));
       toast.error({
         title: "Could not move item",
         description: err instanceof ApiError ? err.message : "Move failed",
       });
     }
+  }
+
+  // BC-1 / VD-3: the same item actions exposed by the right-click context menu,
+  // surfaced through BinChip's always-available kebab so touch and keyboard users
+  // can reach them too.
+  function itemActions(item: DrawerItem): BinChipAction[] {
+    return [
+      {
+        label: "Unassign from drawer",
+        onSelect: () =>
+          relocateOut(item.id, { drawerId: null, binId: null }, `${item.name} removed from the drawer`),
+      },
+      {
+        label: "Assign to other box…",
+        onSelect: () => setAssignItem(item),
+      },
+      {
+        label: "Unassign from box",
+        destructive: true,
+        separatorBefore: true,
+        onSelect: () =>
+          relocateOut(
+            item.id,
+            { boxId: null, drawerId: null, binId: null },
+            `${item.name} removed from the box`,
+          ),
+      },
+    ];
   }
 
   function handleDragStart(event: DragStartEvent) {
@@ -283,17 +353,28 @@ export function VirtualDrawer({
       const base = bins.find((b) => b.id === drag.binId);
       if (!base) return;
 
+      // VD-2: allow a drag to reach one cell beyond the current edge so the grid
+      // grows live during the gesture (not just into the single pre-existing
+      // spare row/col). We bump local rows/cols below so the new track renders;
+      // onUp -> growToFit reconciles and persists the final size.
       if (drag.mode === "move") {
-        const gridCol = clampInt(o.gridCol + dCol, 0, cols - o.colSpan);
-        const gridRow = clampInt(o.gridRow + dRow, 0, rows - o.rowSpan);
+        const gridCol = clampInt(o.gridCol + dCol, 0, cols + 1 - o.colSpan);
+        const gridRow = clampInt(o.gridRow + dRow, 0, rows + 1 - o.rowSpan);
         cand = { ...base, gridRow, gridCol, rowSpan: o.rowSpan, colSpan: o.colSpan };
       } else {
-        const colSpan = clampInt(o.colSpan + dCol, 1, cols - o.gridCol);
-        const rowSpan = clampInt(o.rowSpan + dRow, 1, rows - o.gridRow);
+        const colSpan = clampInt(o.colSpan + dCol, 1, cols + 1 - o.gridCol);
+        const rowSpan = clampInt(o.rowSpan + dRow, 1, rows + 1 - o.gridRow);
         cand = { ...base, rowSpan, colSpan };
       }
       // Only show the preview if it doesn't collide; otherwise keep the last valid.
-      if (fits(cand, drag.binId)) setPreview({ id: drag.binId, bin: cand });
+      if (fits(cand, drag.binId)) {
+        // Grow the live grid so the candidate's new track is rendered under the preview.
+        const candRows = cand.gridRow + cand.rowSpan;
+        const candCols = cand.gridCol + cand.colSpan;
+        if (candRows > rows) setRows(candRows);
+        if (candCols > cols) setCols(candCols);
+        setPreview({ id: drag.binId, bin: cand });
+      }
     }
 
     async function onUp() {
@@ -362,7 +443,12 @@ export function VirtualDrawer({
   }
 
   async function deleteBinMode(bin: BinDetail, mode: BinDeleteMode) {
-    setBins(bins.filter((b) => b.id !== bin.id));
+    const nextBins = bins.filter((b) => b.id !== bin.id);
+    setBins(nextBins);
+    // VD-8: reclaim now-empty trailing rows/cols after removing a bin (growToFit
+    // floors at binRows/binCols and PATCHes the new size, so the shrink survives
+    // the onChanged() refetch's prop-sync at the rows/cols effects).
+    void growToFit(nextBins);
     setItems((prev) =>
       mode === "leave-in-drawer"
         ? prev.map((i) => (i.binId === bin.id ? { ...i, binId: null } : i))
@@ -443,7 +529,15 @@ export function VirtualDrawer({
               <Button
                 variant={editBins ? "default" : "outline"}
                 size="sm"
-                onClick={() => setEditBins((v) => !v)}
+                onClick={() =>
+                  setEditBins((v) => {
+                    // VD-2: ensure a spare trailing row/col exists when entering
+                    // edit mode, so a drawer persisted without one is still
+                    // immediately draggable/resizable into the spare.
+                    if (!v) void growToFit(bins);
+                    return !v;
+                  })
+                }
               >
                 <Move className="h-4 w-4" />
                 {editBins ? "Done" : "Edit bins"}
@@ -531,6 +625,7 @@ export function VirtualDrawer({
                   e.preventDefault();
                   setCtx({ item, x: e.clientX, y: e.clientY });
                 }}
+                itemActions={itemActions}
               />
             );
           })}
@@ -543,6 +638,7 @@ export function VirtualDrawer({
             e.preventDefault();
             setCtx({ item, x: e.clientX, y: e.clientY });
           }}
+          itemActions={itemActions}
         />
 
         <DragOverlay>
@@ -567,8 +663,14 @@ export function VirtualDrawer({
             }}
           />
           <div
-            className="fixed z-50 min-w-[12rem] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg"
-            style={{ top: ctx.y, left: ctx.x }}
+            ref={ctxMenuRef}
+            role="menu"
+            aria-label={`Actions for ${ctx.item.name}`}
+            tabIndex={-1}
+            className="fixed z-50 min-w-[12rem] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg outline-none"
+            // VD-3: render clamped to the viewport (falls back to raw coords for
+            // the first paint before the layout effect measures the menu).
+            style={ctxPos ?? { top: ctx.y, left: ctx.x, visibility: "hidden" }}
           >
             <CtxButton
               label="Unassign from drawer"
@@ -626,7 +728,9 @@ export function VirtualDrawer({
           currentDrawerId={drawerId}
           onMoved={() => {
             const id = moveBin.id;
-            setBins(bins.filter((b) => b.id !== id));
+            const nextBins = bins.filter((b) => b.id !== id);
+            setBins(nextBins);
+            void growToFit(nextBins); // VD-8: reclaim space freed by the moved-out bin
             setItems((prev) => prev.filter((i) => i.binId !== id));
             setMoveBin(null);
             onChanged();
@@ -649,9 +753,10 @@ function CtxButton({
   return (
     <button
       type="button"
+      role="menuitem" // VD-3
       onClick={onClick}
       className={cn(
-        "flex w-full items-center rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+        "flex w-full items-center rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground outline-none",
         destructive && "text-destructive hover:bg-destructive/10 hover:text-destructive",
       )}
     >
@@ -676,6 +781,7 @@ function BinCell({
   onMoveBin,
   onDeleteMode,
   onItemContextMenu,
+  itemActions,
   tileFields,
 }: {
   bin: BinDetail;
@@ -693,6 +799,7 @@ function BinCell({
   onMoveBin: () => void;
   onDeleteMode: (mode: BinDeleteMode) => void;
   onItemContextMenu: (item: DrawerItem, e: React.MouseEvent) => void;
+  itemActions: (item: DrawerItem) => BinChipAction[];
   tileFields: TileField[];
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: binDrop(bin.id) });
@@ -743,6 +850,9 @@ function BinCell({
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Badge variant="outline">{formatNumber(items.length)}</Badge>
+          {/* VD-8: the bin ⋮ actions (clear/move/delete) are intentionally
+              available during edit-bins mode; only item-chip DnD is disabled
+              there (see dragEnabled note above), so the overlap is deliberate. */}
           {(canManage || canReorganize) && (
             <DropdownMenu>
               <DropdownMenuTrigger>
@@ -822,6 +932,7 @@ function BinCell({
               draggable={dragEnabled}
               tileFields={tileFields}
               onContextMenu={(e) => onItemContextMenu(item, e)}
+              actions={itemActions(item)}
             />
           ))
         )}
@@ -849,10 +960,12 @@ function UnassignedTray({
   items,
   dragEnabled,
   onItemContextMenu,
+  itemActions,
 }: {
   items: DrawerItem[];
   dragEnabled: boolean;
   onItemContextMenu: (item: DrawerItem, e: React.MouseEvent) => void;
+  itemActions: (item: DrawerItem) => BinChipAction[];
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `bin:${UNASSIGNED}` });
   return (
@@ -878,6 +991,7 @@ function UnassignedTray({
               item={item}
               draggable={dragEnabled}
               onContextMenu={(e) => onItemContextMenu(item, e)}
+              actions={itemActions(item)}
             />
           ))
         )}

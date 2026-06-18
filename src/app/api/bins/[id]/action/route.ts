@@ -52,7 +52,31 @@ export const POST = route(async (req: Request, ctx: Ctx) => {
     if (!target) return fail("Target drawer not found", 404);
     affectedDrawers.add(target.id);
     await prisma.$transaction(async (tx) => {
-      await tx.bin.update({ where: { id: bin.id }, data: { drawerId: target.id } });
+      // DM-8: re-pack the moved bin below the target drawer's existing bins so
+      // its source grid position can't collide with (overlap) a bin already in
+      // the target; preserve its rowSpan/colSpan and grow the target's grid.
+      const targetBins = await tx.bin.findMany({
+        where: { drawerId: target.id },
+        select: { gridRow: true, rowSpan: true },
+      });
+      const targetDrawer = await tx.drawer.findUnique({
+        where: { id: target.id },
+        select: { binRows: true, binCols: true },
+      });
+      const nextRow = targetBins.reduce((max, b) => Math.max(max, b.gridRow + b.rowSpan), 0);
+      await tx.bin.update({
+        where: { id: bin.id },
+        data: { drawerId: target.id, gridRow: nextRow, gridCol: 0 },
+      });
+      if (targetDrawer) {
+        await tx.drawer.update({
+          where: { id: target.id },
+          data: {
+            binRows: Math.max(targetDrawer.binRows, nextRow + bin.rowSpan),
+            binCols: Math.max(targetDrawer.binCols, bin.colSpan),
+          },
+        });
+      }
       await tx.item.updateMany({
         where: { binId: bin.id },
         data: { drawerId: target.id, boxId: target.boxId },
