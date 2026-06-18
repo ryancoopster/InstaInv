@@ -5,7 +5,9 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/audit";
 import { refreshLocationSummaries } from "@/lib/summary";
 import { buildPurchaseData } from "@/lib/purchases";
+import { isAllowedTransition } from "@/lib/orders/transitions";
 import { enqueueDecision } from "@/lib/notifications/service";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { serializeRequest, requestInclude } from "@/components/orders/serialize";
 
@@ -14,17 +16,18 @@ type Ctx = { params: { id: string } };
 // Each status transition requires a specific permission:
 //   APPROVED / REJECTED -> orders.approve
 //   ORDERED / RECEIVED  -> orders.markOrdered
-//   REQUESTED (reopen)  -> orders.approve
+// F5: REQUESTED (reopen) is intentionally not a valid PATCH target — there is no
+// reverse-stock / Purchase-void semantics and no UI emits it, so allowing it only
+// risked double-applying stock on a re-receive.
 const TRANSITION_PERMISSION = {
   APPROVED: "orders.approve",
   REJECTED: "orders.approve",
-  REQUESTED: "orders.approve",
   ORDERED: "orders.markOrdered",
   RECEIVED: "orders.markOrdered",
 } as const;
 
 const patchSchema = z.object({
-  status: z.enum(["REQUESTED", "APPROVED", "ORDERED", "RECEIVED", "REJECTED"]).optional(),
+  status: z.enum(["APPROVED", "ORDERED", "RECEIVED", "REJECTED"]).optional(),
   // When marking an existing item RECEIVED, optionally add the qty to stock.
   applyToStock: z.boolean().optional(),
   // Allow approvers to set/adjust the unit cost while reviewing.
@@ -53,6 +56,11 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
     const needed = TRANSITION_PERMISSION[body.status];
     if (!hasPermission(user, needed)) {
       return fail("You do not have permission", 403);
+    }
+    // F2: enforce the state machine — permission-by-target alone would let e.g. a
+    // REJECTED row jump straight to RECEIVED, fabricating stock and a Purchase.
+    if (body.status !== existing.status && !isAllowedTransition(existing.status, body.status)) {
+      return fail(`Cannot transition from ${existing.status} to ${body.status}`, 409);
     }
   }
 
@@ -92,13 +100,6 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
         data.receivedAt = now;
         if (!existing.orderedAt) data.orderedAt = now;
         break;
-      case "REQUESTED":
-        // Reopen: clear downstream timestamps.
-        data.approvedById = null;
-        data.approvedAt = null;
-        data.orderedAt = null;
-        data.receivedAt = null;
-        break;
     }
   }
 
@@ -106,6 +107,13 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
   if (body.quantity !== undefined) data.quantity = body.quantity;
   if (body.supplierId !== undefined) data.supplierId = body.supplierId;
   if (body.note !== undefined) data.note = body.note || null;
+
+  // PURCH-3: the stock increment and the Purchase row must reflect the values this
+  // PATCH ends up with, not the pre-edit row — a combined {status:RECEIVED, quantity,
+  // unitCost} would otherwise snapshot stale numbers into the ledger.
+  const effectiveQuantity = body.quantity ?? existing.quantity;
+  const effectiveUnitCost =
+    body.unitCost !== undefined ? new Prisma.Decimal(body.unitCost) : existing.unitCost;
 
   // On RECEIVED of an existing item, optionally increment on-hand stock.
   const shouldApplyStock =
@@ -116,20 +124,46 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
 
   // Record a purchase whenever the request first reaches RECEIVED ("bought"),
   // whether or not stock is applied and whether or not it's a linked item.
-  const shouldRecordPurchase = body.status === "RECEIVED" && existing.status !== "RECEIVED";
+  const isFirstReceive = body.status === "RECEIVED" && existing.status !== "RECEIVED";
 
+  let appliedStock = false;
   const updated = await prisma.$transaction(async (tx) => {
-    if (shouldApplyStock && existing.itemId) {
-      await tx.item.update({
-        where: { id: existing.itemId },
-        data: { quantity: { increment: existing.quantity } },
+    // F1 / PURCH-1: make the receive atomic. Gate the RECEIVED transition on the
+    // current status via a conditional updateMany so two concurrent receives (a
+    // double-click, or this route racing the bulk /orders/mark) can't both pass a
+    // stale guard and double-apply stock + insert a duplicate Purchase. Only the
+    // request that actually flips the row (count === 1) runs the side effects.
+    if (isFirstReceive) {
+      const res = await tx.orderRequest.updateMany({
+        where: { id: params.id, status: { not: "RECEIVED" } },
+        data,
       });
-    }
-    if (shouldRecordPurchase) {
-      await tx.purchase.create({
-        data: buildPurchaseData(existing, user.id, Boolean(shouldApplyStock)),
+      if (res.count === 1) {
+        appliedStock = Boolean(shouldApplyStock);
+        if (shouldApplyStock && existing.itemId) {
+          await tx.item.update({
+            where: { id: existing.itemId },
+            data: { quantity: { increment: effectiveQuantity } },
+          });
+        }
+        await tx.purchase.create({
+          data: buildPurchaseData(
+            { ...existing, quantity: effectiveQuantity, unitCost: effectiveUnitCost },
+            user.id,
+            appliedStock,
+          ),
+        });
+      }
+      // updateMany returns no row — re-fetch for the response (also reflects the
+      // winning concurrent write if this request lost the race).
+      const row = await tx.orderRequest.findUnique({
+        where: { id: params.id },
+        include: requestInclude,
       });
+      if (!row) throw new Error("Request vanished mid-transaction");
+      return row;
     }
+
     return tx.orderRequest.update({
       where: { id: params.id },
       data,
@@ -138,8 +172,13 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
   });
 
   // Keep drawer/box summaries in sync if stock changed.
-  if (shouldApplyStock && existing.item?.drawerId) {
-    await refreshLocationSummaries(existing.item.drawerId);
+  // PURCH-2: a refresh failure must not 500 an already-committed receive.
+  if (appliedStock && existing.item?.drawerId) {
+    try {
+      await refreshLocationSummaries(existing.item.drawerId);
+    } catch (e) {
+      console.error("[requests] summary refresh failed", e);
+    }
   }
 
   await logActivity({
@@ -147,11 +186,20 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
     action: body.status ? `order.${body.status.toLowerCase()}` : "order.update",
     entity: "OrderRequest",
     entityId: updated.id,
-    meta: { status: updated.status, appliedToStock: shouldApplyStock },
+    meta: { status: updated.status, appliedToStock: appliedStock },
   });
 
   // Queue a digest notification to the requester on approve/deny.
-  if ((body.status === "APPROVED" || body.status === "REJECTED") && existing.requestedById) {
+  // NOTIF-4: only enqueue when the status actually transitions INTO the decision
+  // state (not on an idempotent re-PATCH / double-click), mirroring the prior-state
+  // guards used for stock/purchase.
+  // NOTIF-5: don't notify the requester about their own approve/deny action.
+  if (
+    (body.status === "APPROVED" || body.status === "REJECTED") &&
+    existing.status !== body.status &&
+    existing.requestedById &&
+    existing.requestedById !== user.id
+  ) {
     void enqueueDecision(existing.requestedById, params.id, body.status);
   }
 

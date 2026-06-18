@@ -3,13 +3,16 @@ import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { reorderQty } from "@/lib/utils";
 import { logActivity } from "@/lib/audit";
+import { Prisma } from "@prisma/client";
 
 // POST /api/orders/generate-shortfalls
 //   Materialize current stock shortfalls into OrderRequest rows
 //   (source STOCK_SHORTFALL, status REQUESTED) for items that are below their
-//   desired level AND don't already have an open request. Idempotent: running
-//   it twice won't create duplicates because items with an open request are
-//   skipped.
+//   desired level AND don't already have an open request. Idempotent: the
+//   open-request pre-check is best-effort, so the partial unique index
+//   OrderRequest_open_item_unique is the real backstop — a concurrent generate /
+//   manual add that already opened a request makes our insert fail with P2002,
+//   which we skip per-item (DM-7).
 export const POST = route(async () => {
   const user = await requirePermission("orders.setDesired");
 
@@ -48,9 +51,13 @@ export const POST = route(async () => {
   const min = await prisma.orderRequest.aggregate({ _min: { sortOrder: true } });
   let nextSort = (min._min.sortOrder ?? 0) - 1;
 
-  await prisma.$transaction(
-    toCreate.map(({ it, needed }) =>
-      prisma.orderRequest.create({
+  // DM-7: insert per-item and swallow P2002 (the OrderRequest_open_item_unique
+  // partial index firing) so a row that another request opened concurrently is
+  // skipped gracefully instead of 500-ing the whole batch.
+  let created = 0;
+  for (const { it, needed } of toCreate) {
+    try {
+      await prisma.orderRequest.create({
         data: {
           itemId: it.id,
           supplierId: it.supplierId ?? null,
@@ -61,16 +68,22 @@ export const POST = route(async () => {
           requestedById: user.id,
           sortOrder: nextSort--,
         },
-      }),
-    ),
-  );
+      });
+      created++;
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+        continue; // an open request for this item already exists — skip it.
+      }
+      throw err;
+    }
+  }
 
   await logActivity({
     userId: user.id,
     action: "order.generateShortfalls",
     entity: "OrderRequest",
-    meta: { created: toCreate.length },
+    meta: { created },
   });
 
-  return ok({ created: toCreate.length });
+  return ok({ created });
 });
