@@ -208,6 +208,7 @@ export function DrawerDetailClient({
         <TabsContent value="virtual" className="mt-4">
           <VirtualDrawer
             drawerId={drawer.id}
+            boxId={drawer.boxId}
             binRows={drawer.binRows}
             binCols={drawer.binCols}
             bins={bins}

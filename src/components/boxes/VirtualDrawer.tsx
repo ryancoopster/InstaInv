@@ -12,7 +12,7 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { Move, Plus, Trash2, SlidersHorizontal } from "lucide-react";
+import { Move, Plus, Trash2, SlidersHorizontal, MoreVertical, FolderInput, Eraser } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn, formatNumber } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,12 +23,17 @@ import {
   DropdownMenu,
   DropdownMenuTrigger,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/toast";
 import { BinChip, type TileField } from "./BinChip";
 import { AssignToBoxDialog } from "./AssignToBoxDialog";
+import { BinMoveDialog } from "./BinMoveDialog";
 import { COLOR_SWATCHES, type BinDetail, type DrawerItem, type DrawerFieldDef } from "./types";
+
+type BinDeleteMode = "leave-in-drawer" | "unassign-from-drawer" | "unassign-from-box";
 
 const STD_TILE_FIELDS: TileField[] = [
   { key: "partNumber", label: "Part #" },
@@ -42,6 +47,7 @@ const TILE_FIELDS_STORAGE_KEY = "instainv:drawer-tile-fields";
 
 interface VirtualDrawerProps {
   drawerId: string;
+  boxId: string;
   binRows: number;
   binCols: number;
   bins: BinDetail[];
@@ -73,6 +79,7 @@ type DragState = {
 
 export function VirtualDrawer({
   drawerId,
+  boxId,
   binRows,
   binCols,
   bins,
@@ -84,6 +91,7 @@ export function VirtualDrawer({
   setBins,
   setItems,
 }: VirtualDrawerProps) {
+  const [moveBin, setMoveBin] = React.useState<BinDetail | null>(null);
   const allTileFields: TileField[] = React.useMemo(
     () => [...STD_TILE_FIELDS, ...customFieldDefs.map((d) => ({ key: `custom:${d.key}`, label: d.name }))],
     [customFieldDefs],
@@ -353,17 +361,37 @@ export function VirtualDrawer({
     }
   }
 
-  async function deleteBin(bin: BinDetail) {
+  async function deleteBinMode(bin: BinDetail, mode: BinDeleteMode) {
+    setBins(bins.filter((b) => b.id !== bin.id));
+    setItems((prev) =>
+      mode === "leave-in-drawer"
+        ? prev.map((i) => (i.binId === bin.id ? { ...i, binId: null } : i))
+        : prev.filter((i) => i.binId !== bin.id),
+    );
     try {
-      await api.del(`/api/bins/${bin.id}`);
-      setBins(bins.filter((b) => b.id !== bin.id));
-      setItems((prev) => prev.map((i) => (i.binId === bin.id ? { ...i, binId: null } : i)));
+      await api.post(`/api/bins/${bin.id}/action`, { action: "delete", mode });
       onChanged();
     } catch (err) {
       toast.error({
         title: "Delete failed",
         description: err instanceof ApiError ? err.message : "Could not delete bin",
       });
+      onChanged();
+    }
+  }
+
+  async function clearBin(bin: BinDetail) {
+    setItems((prev) => prev.map((i) => (i.binId === bin.id ? { ...i, binId: null } : i)));
+    try {
+      await api.post(`/api/bins/${bin.id}/action`, { action: "clear" });
+      toast.success("Removed all items from the bin");
+      onChanged();
+    } catch (err) {
+      toast.error({
+        title: "Could not clear bin",
+        description: err instanceof ApiError ? err.message : "Failed",
+      });
+      onChanged();
     }
   }
 
@@ -495,7 +523,10 @@ export function VirtualDrawer({
                 }}
                 onMoveHandle={(e) => beginBinDrag(e, bin, "move")}
                 onResizeHandle={(e) => beginBinDrag(e, bin, "resize")}
-                onDelete={() => deleteBin(bin)}
+                canReorganize={canReorganize}
+                onClearItems={() => clearBin(bin)}
+                onMoveBin={() => setMoveBin(bin)}
+                onDeleteMode={(mode) => deleteBinMode(bin, mode)}
                 onItemContextMenu={(item, e) => {
                   e.preventDefault();
                   setCtx({ item, x: e.clientX, y: e.clientY });
@@ -576,9 +607,28 @@ export function VirtualDrawer({
           onOpenChange={(o) => !o && setAssignItem(null)}
           itemId={assignItem.id}
           itemName={assignItem.name}
+          defaultBoxId={boxId}
           onAssigned={() => {
             setItems((prev) => prev.filter((i) => i.id !== assignItem.id));
             setAssignItem(null);
+            onChanged();
+          }}
+        />
+      )}
+
+      {moveBin && (
+        <BinMoveDialog
+          open={moveBin !== null}
+          onOpenChange={(o) => !o && setMoveBin(null)}
+          binId={moveBin.id}
+          binName={moveBin.name ?? ""}
+          defaultBoxId={boxId}
+          currentDrawerId={drawerId}
+          onMoved={() => {
+            const id = moveBin.id;
+            setBins(bins.filter((b) => b.id !== id));
+            setItems((prev) => prev.filter((i) => i.binId !== id));
+            setMoveBin(null);
             onChanged();
           }}
         />
@@ -621,7 +671,10 @@ function BinCell({
   onColor,
   onMoveHandle,
   onResizeHandle,
-  onDelete,
+  canReorganize,
+  onClearItems,
+  onMoveBin,
+  onDeleteMode,
   onItemContextMenu,
   tileFields,
 }: {
@@ -635,7 +688,10 @@ function BinCell({
   onColor: (color: string | null) => void;
   onMoveHandle: (e: React.PointerEvent) => void;
   onResizeHandle: (e: React.PointerEvent) => void;
-  onDelete: () => void;
+  canReorganize: boolean;
+  onClearItems: () => void;
+  onMoveBin: () => void;
+  onDeleteMode: (mode: BinDeleteMode) => void;
   onItemContextMenu: (item: DrawerItem, e: React.MouseEvent) => void;
   tileFields: TileField[];
 }) {
@@ -685,9 +741,48 @@ function BinCell({
             <span className="truncate text-xs font-medium">{bin.name || "Bin"}</span>
           )}
         </div>
-        <Badge variant="outline" className="shrink-0">
-          {formatNumber(items.length)}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-1">
+          <Badge variant="outline">{formatNumber(items.length)}</Badge>
+          {(canManage || canReorganize) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger>
+                <button
+                  type="button"
+                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  aria-label="Bin actions"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {canReorganize && (
+                  <DropdownMenuItem onClick={onClearItems}>
+                    <Eraser /> Remove all items from bin
+                  </DropdownMenuItem>
+                )}
+                {canManage && (
+                  <DropdownMenuItem onClick={onMoveBin}>
+                    <FolderInput /> Move bin to another drawer/box…
+                  </DropdownMenuItem>
+                )}
+                {canManage && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => onDeleteMode("leave-in-drawer")}>
+                      <Trash2 /> Delete bin, keep items in drawer
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onDeleteMode("unassign-from-drawer")}>
+                      <Trash2 /> Delete bin, unassign items from drawer
+                    </DropdownMenuItem>
+                    <DropdownMenuItem destructive onClick={() => onDeleteMode("unassign-from-box")}>
+                      <Trash2 /> Delete bin, unassign items from box
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
       </div>
 
       {editBins && canManage && (
@@ -712,14 +807,6 @@ function BinCell({
             aria-label="Clear color"
           >
             ✕
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            className="ml-auto rounded p-0.5 text-destructive hover:bg-destructive/10"
-            title="Delete bin"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
