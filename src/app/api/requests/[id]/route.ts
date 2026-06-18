@@ -4,6 +4,7 @@ import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/audit";
 import { refreshLocationSummaries } from "@/lib/summary";
+import { buildPurchaseData } from "@/lib/purchases";
 import { z } from "zod";
 import { serializeRequest, requestInclude } from "@/components/orders/serialize";
 
@@ -39,7 +40,10 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
 
   const existing = await prisma.orderRequest.findUnique({
     where: { id: params.id },
-    include: { item: { select: { id: true, drawerId: true } } },
+    include: {
+      item: { select: { id: true, name: true, partNumber: true, purchaseCost: true, drawerId: true } },
+      supplier: { select: { name: true } },
+    },
   });
   if (!existing) return fail("Request not found", 404);
 
@@ -109,11 +113,20 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
     existing.itemId &&
     existing.status !== "RECEIVED"; // never double-apply
 
+  // Record a purchase whenever the request first reaches RECEIVED ("bought"),
+  // whether or not stock is applied and whether or not it's a linked item.
+  const shouldRecordPurchase = body.status === "RECEIVED" && existing.status !== "RECEIVED";
+
   const updated = await prisma.$transaction(async (tx) => {
     if (shouldApplyStock && existing.itemId) {
       await tx.item.update({
         where: { id: existing.itemId },
         data: { quantity: { increment: existing.quantity } },
+      });
+    }
+    if (shouldRecordPurchase) {
+      await tx.purchase.create({
+        data: buildPurchaseData(existing, user.id, Boolean(shouldApplyStock)),
       });
     }
     return tx.orderRequest.update({

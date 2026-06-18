@@ -3,6 +3,7 @@ import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/audit";
 import { refreshLocationSummaries } from "@/lib/summary";
+import { buildPurchaseData } from "@/lib/purchases";
 import { z } from "zod";
 
 // PATCH /api/orders/mark
@@ -22,7 +23,10 @@ export const PATCH = route(async (req: Request) => {
 
   const requests = await prisma.orderRequest.findMany({
     where: { id: { in: ids } },
-    include: { item: { select: { id: true, drawerId: true } } },
+    include: {
+      item: { select: { id: true, name: true, partNumber: true, purchaseCost: true, drawerId: true } },
+      supplier: { select: { name: true } },
+    },
   });
   if (requests.length === 0) return fail("No matching requests", 404);
 
@@ -37,13 +41,19 @@ export const PATCH = route(async (req: Request) => {
       } else {
         data.receivedAt = now;
         if (!r.orderedAt) data.orderedAt = now;
+        const firstReceive = r.status !== "RECEIVED";
+        const appliedStock = Boolean(applyToStock && r.itemId && firstReceive);
         // Apply stock once, only for existing items not already received.
-        if (applyToStock && r.itemId && r.status !== "RECEIVED") {
+        if (appliedStock && r.itemId) {
           await tx.item.update({
             where: { id: r.itemId },
             data: { quantity: { increment: r.quantity } },
           });
           if (r.item?.drawerId) drawerIds.add(r.item.drawerId);
+        }
+        // Record a purchase on first receipt (linked or free-text).
+        if (firstReceive) {
+          await tx.purchase.create({ data: buildPurchaseData(r, user.id, appliedStock) });
         }
       }
       await tx.orderRequest.update({ where: { id: r.id }, data });

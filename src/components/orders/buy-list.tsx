@@ -142,6 +142,29 @@ export function BuyList({
     }
   }
 
+  async function markGroupReceived(requestIds: string[], groupKey: string) {
+    if (requestIds.length === 0) {
+      toast.info("Nothing to mark — this group has only live shortfalls. Generate requests first.");
+      return;
+    }
+    setMarkingGroup(groupKey);
+    try {
+      const res = await api.patch<{ updated: number }>("/api/orders/mark", {
+        ids: requestIds,
+        status: "RECEIVED",
+        applyToStock: true,
+      });
+      toast.success(
+        `Marked ${res.updated} line${res.updated === 1 ? "" : "s"} received — stock updated & logged`,
+      );
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Mark received failed");
+    } finally {
+      setMarkingGroup(null);
+    }
+  }
+
   const hasLines = data.groups.length > 0;
 
   return (
@@ -250,20 +273,35 @@ export function BuyList({
                     </CardDescription>
                   </div>
                   {canMark && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={markingGroup === groupKey || group.approvedRequestIds.length === 0}
-                      onClick={() => markGroupOrdered(group.approvedRequestIds, groupKey)}
-                      title={
-                        group.approvedRequestIds.length === 0
-                          ? "Generate requests for shortfalls before ordering"
-                          : "Mark every approved line in this group as ordered"
-                      }
-                    >
-                      <ShoppingCart className="h-4 w-4" />
-                      Mark group ordered
-                    </Button>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={markingGroup === groupKey || group.approvedRequestIds.length === 0}
+                        onClick={() => markGroupOrdered(group.approvedRequestIds, groupKey)}
+                        title={
+                          group.approvedRequestIds.length === 0
+                            ? "Generate requests for shortfalls before ordering"
+                            : "Mark every approved line in this group as ordered"
+                        }
+                      >
+                        <ShoppingCart className="h-4 w-4" />
+                        Mark group ordered
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={markingGroup === groupKey || group.approvedRequestIds.length === 0}
+                        onClick={() => markGroupReceived(group.approvedRequestIds, groupKey)}
+                        title={
+                          group.approvedRequestIds.length === 0
+                            ? "Generate requests for shortfalls before receiving"
+                            : "Mark every approved line received — adds the bought qty to stock and logs a purchase"
+                        }
+                      >
+                        <PackageCheck className="h-4 w-4" />
+                        Mark received (bought)
+                      </Button>
+                    </div>
                   )}
                 </CardHeader>
                 <CardContent className="pt-0">

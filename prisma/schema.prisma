@@ -61,6 +61,7 @@ model User {
   orderRequests      OrderRequest[] @relation("requestedBy")
   approvedRequests   OrderRequest[] @relation("approvedBy")
   activityLogs       ActivityLog[]
+  purchases          Purchase[]     @relation("purchasedBy")
 }
 
 model ActivityLog {
@@ -99,6 +100,7 @@ model Supplier {
 
   items         Item[]
   orderRequests OrderRequest[]
+  purchases     Purchase[]
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +273,7 @@ model Item {
 
   orderRequests   OrderRequest[]
   priceHistory    PriceHistory[]
+  purchases       Purchase[]
 
   @@index([categoryId])
   @@index([drawerId])
@@ -345,6 +348,8 @@ model OrderRequest {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  purchases     Purchase[]
+
   @@index([status])
   @@index([supplierId])
   @@index([itemId])
@@ -387,4 +392,39 @@ model Setting {
   key       String   @id
   value     Json     @default("{}")
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Purchase log — one row per "bought" event (an OrderRequest reaching RECEIVED).
+// Snapshot fields (itemName/partNumber/supplierName/totalCost) are denormalized
+// so the history survives an item/supplier being renamed or deleted.
+// ---------------------------------------------------------------------------
+
+model Purchase {
+  id             String        @id @default(cuid())
+  itemId         String?
+  item           Item?         @relation(fields: [itemId], references: [id], onDelete: SetNull)
+  orderRequestId String?
+  orderRequest   OrderRequest? @relation(fields: [orderRequestId], references: [id], onDelete: SetNull)
+  supplierId     String?
+  supplier       Supplier?     @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  itemName       String?
+  partNumber     String?
+  supplierName   String?
+  quantity       Int
+  unitCost       Decimal       @default(0) @db.Decimal(12, 4)
+  totalCost      Decimal       @default(0) @db.Decimal(12, 4)
+  appliedToStock Boolean       @default(false)
+  note           String?
+
+  purchasedById  String?
+  purchasedBy    User?         @relation("purchasedBy", fields: [purchasedById], references: [id], onDelete: SetNull)
+  purchasedAt    DateTime      @default(now())
+  createdAt      DateTime      @default(now())
+
+  @@index([itemId])
+  @@index([supplierId])
+  @@index([orderRequestId])
+  @@index([purchasedAt])
 }

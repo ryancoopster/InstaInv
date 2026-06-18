@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 import { ItemForm } from "@/components/items/item-form";
 import { ItemPricePanel } from "@/components/pricing/item-price-panel";
+import { PurchaseHistoryPanel } from "@/components/items/purchase-history-panel";
 import { itemInclude, serializeItem } from "@/app/api/items/_serialize";
 import type { ItemRow, BoxOption, CustomFieldDef } from "@/components/items/types";
 import type { PriceFetchStatus } from "@/lib/pricing/types";
@@ -80,6 +81,8 @@ export default async function ItemDetailPage({ params }: PageProps) {
 
   // Only users who can manage pricing see the live-pricing controls.
   const canManagePricing = await can("pricing.manage");
+  // Purchase history is visible to anyone who can see all orders.
+  const canViewPurchases = await can("orders.viewAll");
 
   return (
     <div className="space-y-6">
@@ -109,6 +112,17 @@ export default async function ItemDetailPage({ params }: PageProps) {
             priceFetchError={itemRaw.priceFetchError ?? null}
             supplierLink={item.supplierLink}
           />
+        </section>
+      )}
+      {canViewPurchases && (
+        <section className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold tracking-tight">Purchase history</h2>
+            <p className="text-sm text-muted-foreground">
+              Every time this item was marked received from the buy list.
+            </p>
+          </div>
+          <PurchaseHistoryPanel itemId={item.id} />
         </section>
       )}
     </div>

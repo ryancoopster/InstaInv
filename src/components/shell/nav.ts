@@ -6,6 +6,7 @@ import {
   Boxes,
   ClipboardList,
   ShoppingCart,
+  Receipt,
   BarChart3,
   Tag,
   Printer,
@@ -42,6 +43,7 @@ export const NAV_ITEMS: NavItem[] = [
   // --- Ordering ---
   { label: "Order Requests", href: "/requests", icon: ClipboardList, permission: "orders.request", group: "Ordering" },
   { label: "Buy List", href: "/orders", icon: ShoppingCart, permission: "orders.viewAll", group: "Ordering" },
+  { label: "Purchases", href: "/purchases", icon: Receipt, permission: "orders.viewAll", group: "Ordering" },
 
   // --- Tools ---
   { label: "Reports", href: "/reports", icon: BarChart3, permission: "reports.view", group: "Tools" },
