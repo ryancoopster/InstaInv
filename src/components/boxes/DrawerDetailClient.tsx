@@ -21,13 +21,14 @@ import { toast } from "@/components/ui/toast";
 import { DrawerItemsList } from "./DrawerItemsList";
 import { VirtualDrawer } from "./VirtualDrawer";
 import { InventoryStepper } from "./InventoryStepper";
-import type { BinDetail, DrawerDetail, DrawerItem } from "./types";
+import type { BinDetail, DrawerDetail, DrawerItem, DrawerFieldDef } from "./types";
 
 interface DrawerDetailClientProps {
   drawer: DrawerDetail;
   canManage: boolean;
   canReorganize: boolean;
   canAdjust: boolean;
+  customFieldDefs?: DrawerFieldDef[];
   prevDrawerId: string | null;
   nextDrawerId: string | null;
 }
@@ -37,6 +38,7 @@ export function DrawerDetailClient({
   canManage,
   canReorganize,
   canAdjust,
+  customFieldDefs = [],
   prevDrawerId,
   nextDrawerId,
 }: DrawerDetailClientProps) {
@@ -212,6 +214,7 @@ export function DrawerDetailClient({
             items={items}
             canManage={canManage}
             canReorganize={canReorganize}
+            customFieldDefs={customFieldDefs}
             onChanged={reloadDrawer}
             setBins={setBins}
             setItems={setItems}

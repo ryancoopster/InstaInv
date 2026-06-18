@@ -69,6 +69,17 @@ export interface DrawerItem {
   binId: string | null;
   sortOrder: number;
   category: { name: string; color: string | null } | null;
+  // Optional extras used by the virtual-drawer tile field toggles.
+  partNumber?: string | null;
+  sku?: string | null;
+  supplierName?: string | null;
+  customValues?: Record<string, unknown>;
+}
+
+// A custom field available on items in this drawer (key -> display label).
+export interface DrawerFieldDef {
+  key: string;
+  name: string;
 }
 
 export interface DrawerDetail {

@@ -12,16 +12,33 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { Move, Plus, Trash2 } from "lucide-react";
+import { Move, Plus, Trash2, SlidersHorizontal } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { cn, formatNumber } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/toast";
-import { BinChip } from "./BinChip";
+import { BinChip, type TileField } from "./BinChip";
 import { AssignToBoxDialog } from "./AssignToBoxDialog";
-import { COLOR_SWATCHES, type BinDetail, type DrawerItem } from "./types";
+import { COLOR_SWATCHES, type BinDetail, type DrawerItem, type DrawerFieldDef } from "./types";
+
+const STD_TILE_FIELDS: TileField[] = [
+  { key: "partNumber", label: "Part #" },
+  { key: "sku", label: "SKU" },
+  { key: "quantity", label: "Qty" },
+  { key: "unit", label: "Unit" },
+  { key: "category", label: "Category" },
+  { key: "supplier", label: "Supplier" },
+];
+const TILE_FIELDS_STORAGE_KEY = "instainv:drawer-tile-fields";
 
 interface VirtualDrawerProps {
   drawerId: string;
@@ -31,6 +48,7 @@ interface VirtualDrawerProps {
   items: DrawerItem[];
   canManage: boolean;
   canReorganize: boolean;
+  customFieldDefs?: DrawerFieldDef[];
   onChanged: () => void;
   setBins: (bins: BinDetail[]) => void;
   setItems: (updater: (items: DrawerItem[]) => DrawerItem[]) => void;
@@ -61,10 +79,37 @@ export function VirtualDrawer({
   items,
   canManage,
   canReorganize,
+  customFieldDefs = [],
   onChanged,
   setBins,
   setItems,
 }: VirtualDrawerProps) {
+  const allTileFields: TileField[] = React.useMemo(
+    () => [...STD_TILE_FIELDS, ...customFieldDefs.map((d) => ({ key: `custom:${d.key}`, label: d.name }))],
+    [customFieldDefs],
+  );
+  const [selectedFieldKeys, setSelectedFieldKeys] = React.useState<string[]>(["partNumber", "quantity"]);
+  React.useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(TILE_FIELDS_STORAGE_KEY);
+      if (saved) setSelectedFieldKeys(JSON.parse(saved));
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  function toggleField(key: string) {
+    setSelectedFieldKeys((prev) => {
+      const next = prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key];
+      try {
+        window.localStorage.setItem(TILE_FIELDS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }
+  const tileFields = allTileFields.filter((f) => selectedFieldKeys.includes(f.key));
+
   const [editBins, setEditBins] = React.useState(false);
   const [activeItem, setActiveItem] = React.useState<DrawerItem | null>(null);
   const [ctx, setCtx] = React.useState<{ item: DrawerItem; x: number; y: number } | null>(null);
@@ -337,22 +382,47 @@ export function VirtualDrawer({
               ? "Drag item chips between bins, or to the tray below to unassign them."
               : "A virtual layout of the drawer's bins and the items in each."}
         </p>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={addBin}>
-              <Plus className="h-4 w-4" />
-              Add bin
-            </Button>
-            <Button
-              variant={editBins ? "default" : "outline"}
-              size="sm"
-              onClick={() => setEditBins((v) => !v)}
-            >
-              <Move className="h-4 w-4" />
-              {editBins ? "Done" : "Edit bins"}
-            </Button>
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <DropdownMenu>
+            <DropdownMenuTrigger>
+              <Button variant="outline" size="sm">
+                <SlidersHorizontal className="h-4 w-4" />
+                Fields
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel>Show on bin tiles</DropdownMenuLabel>
+              {allTileFields.map((f) => (
+                <label
+                  key={f.key}
+                  className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-accent"
+                >
+                  <Checkbox
+                    checked={selectedFieldKeys.includes(f.key)}
+                    onCheckedChange={() => toggleField(f.key)}
+                  />
+                  {f.label}
+                </label>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {canManage && (
+            <>
+              <Button variant="outline" size="sm" onClick={addBin}>
+                <Plus className="h-4 w-4" />
+                Add bin
+              </Button>
+              <Button
+                variant={editBins ? "default" : "outline"}
+                size="sm"
+                onClick={() => setEditBins((v) => !v)}
+              >
+                <Move className="h-4 w-4" />
+                {editBins ? "Done" : "Edit bins"}
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <DndContext
@@ -414,6 +484,7 @@ export function VirtualDrawer({
                 dragEnabled={dragEnabled}
                 canManage={canManage}
                 dragging={preview?.id === bin.id}
+                tileFields={tileFields}
                 onRename={(name) => {
                   setBins(bins.map((b) => (b.id === bin.id ? { ...b, name } : b)));
                   persistBin(bin.id, { name });
@@ -552,6 +623,7 @@ function BinCell({
   onResizeHandle,
   onDelete,
   onItemContextMenu,
+  tileFields,
 }: {
   bin: BinDetail;
   items: DrawerItem[];
@@ -565,6 +637,7 @@ function BinCell({
   onResizeHandle: (e: React.PointerEvent) => void;
   onDelete: () => void;
   onItemContextMenu: (item: DrawerItem, e: React.MouseEvent) => void;
+  tileFields: TileField[];
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: binDrop(bin.id) });
   const [nameDraft, setNameDraft] = React.useState(bin.name ?? "");
@@ -660,6 +733,7 @@ function BinCell({
               key={item.id}
               item={item}
               draggable={dragEnabled}
+              tileFields={tileFields}
               onContextMenu={(e) => onItemContextMenu(item, e)}
             />
           ))

@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { DrawerDetailClient } from "@/components/boxes/DrawerDetailClient";
-import type { BinDetail, DrawerDetail, DrawerItem } from "@/components/boxes/types";
+import type { BinDetail, DrawerDetail, DrawerItem, DrawerFieldDef } from "@/components/boxes/types";
 
 export const dynamic = "force-dynamic";
 
@@ -37,12 +37,17 @@ export default async function DrawerPage({
           select: {
             id: true,
             name: true,
+            partNumber: true,
+            sku: true,
             quantity: true,
             unit: true,
             imageUrl: true,
             binId: true,
+            categoryId: true,
             sortOrder: true,
+            customValues: true,
             category: { select: { name: true, color: true } },
+            supplier: { select: { name: true } },
           },
         },
       },
@@ -71,13 +76,37 @@ export default async function DrawerPage({
   const items: DrawerItem[] = drawer.items.map((it) => ({
     id: it.id,
     name: it.name,
+    partNumber: it.partNumber,
+    sku: it.sku,
     quantity: it.quantity,
     unit: it.unit,
     imageUrl: it.imageUrl,
     binId: it.binId,
     sortOrder: it.sortOrder,
     category: it.category ? { name: it.category.name, color: it.category.color } : null,
+    supplierName: it.supplier?.name ?? null,
+    customValues: (it.customValues as Record<string, unknown>) ?? {},
   }));
+
+  // Custom field defs for the categories present in this drawer (key -> label),
+  // so the virtual-drawer tile field toggles can offer + label custom fields.
+  const categoryIds = Array.from(
+    new Set(drawer.items.map((it) => it.categoryId).filter((c): c is string => Boolean(c))),
+  );
+  const fieldDefsRaw = categoryIds.length
+    ? await prisma.customFieldDef.findMany({
+        where: { categoryId: { in: categoryIds } },
+        orderBy: { sortOrder: "asc" },
+        select: { key: true, name: true },
+      })
+    : [];
+  const seenKeys = new Set<string>();
+  const customFieldDefs: DrawerFieldDef[] = [];
+  for (const d of fieldDefsRaw) {
+    if (seenKeys.has(d.key)) continue;
+    seenKeys.add(d.key);
+    customFieldDefs.push({ key: d.key, name: d.name });
+  }
 
   const detail: DrawerDetail = {
     id: drawer.id,
@@ -108,6 +137,7 @@ export default async function DrawerPage({
       canManage={canManage}
       canReorganize={canReorganize}
       canAdjust={canAdjust}
+      customFieldDefs={customFieldDefs}
       prevDrawerId={prevDrawerId}
       nextDrawerId={nextDrawerId}
     />
