@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   DndContext,
@@ -17,11 +18,12 @@ import {
   rectSortingStrategy,
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
-import { ArrowDownAZ, Boxes as BoxesIcon, Plus } from "lucide-react";
+import { ArrowDownAZ, Boxes as BoxesIcon, Plus, PackageX } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { applySort } from "@/lib/utils";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Select } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -40,11 +42,12 @@ import type { BoxListItem } from "./types";
 interface BoxGridProps {
   initialBoxes: BoxListItem[];
   canManage: boolean;
+  unassignedCount?: number;
 }
 
 type SortKey = "manual" | "name" | "drawerCount" | "itemCount";
 
-export function BoxGrid({ initialBoxes, canManage }: BoxGridProps) {
+export function BoxGrid({ initialBoxes, canManage, unassignedCount = 0 }: BoxGridProps) {
   const router = useRouter();
   const [boxes, setBoxes] = React.useState<BoxListItem[]>(initialBoxes);
   const [sortKey, setSortKey] = React.useState<SortKey>("manual");
@@ -140,6 +143,22 @@ export function BoxGrid({ initialBoxes, canManage }: BoxGridProps) {
           </div>
         }
       />
+
+      {unassignedCount > 0 && (
+        <Link
+          href="/items"
+          className="flex items-center justify-between gap-3 rounded-lg border border-dashed border-border bg-muted/20 px-4 py-3 transition-colors hover:border-primary/60"
+        >
+          <div className="flex items-center gap-2">
+            <PackageX className="h-5 w-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Unassigned items</p>
+              <p className="text-xs text-muted-foreground">Items not placed in any box</p>
+            </div>
+          </div>
+          <Badge variant="secondary">{unassignedCount}</Badge>
+        </Link>
+      )}
 
       {view.length === 0 ? (
         <EmptyState

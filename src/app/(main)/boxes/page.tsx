@@ -20,14 +20,17 @@ export default async function BoxesPage() {
 
   const canManage = hasPermission(user, "boxes.manage");
 
-  const boxes = await prisma.box.findMany({
-    orderBy: { sortOrder: "asc" },
-    include: {
-      drawers: {
-        select: { id: true, items: { select: { id: true, quantity: true } } },
+  const [boxes, unassignedCount] = await Promise.all([
+    prisma.box.findMany({
+      orderBy: { sortOrder: "asc" },
+      include: {
+        drawers: {
+          select: { id: true, items: { select: { id: true, quantity: true } } },
+        },
       },
-    },
-  });
+    }),
+    prisma.item.count({ where: { boxId: null } }),
+  ]);
 
   const initialBoxes: BoxListItem[] = boxes.map((b) => {
     let itemCount = 0;
@@ -52,5 +55,5 @@ export default async function BoxesPage() {
     };
   });
 
-  return <BoxGrid initialBoxes={initialBoxes} canManage={canManage} />;
+  return <BoxGrid initialBoxes={initialBoxes} canManage={canManage} unassignedCount={unassignedCount} />;
 }

@@ -3,7 +3,7 @@ import { getSessionUser } from "@/lib/auth";
 import { hasPermission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { BoxDetailClient } from "@/components/boxes/BoxDetailClient";
-import type { BoxDetail, DrawerSummary } from "@/components/boxes/types";
+import type { BoxDetail, DrawerSummary, DrawerItem } from "@/components/boxes/types";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +37,32 @@ export default async function BoxFrontPage({ params }: { params: { boxId: string
   ]);
 
   if (!box) notFound();
+
+  // Items assigned to this box but not placed in any drawer.
+  const looseRaw = await prisma.item.findMany({
+    where: { boxId: params.boxId, drawerId: null },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      partNumber: true,
+      quantity: true,
+      unit: true,
+      imageUrl: true,
+      category: { select: { name: true, color: true } },
+    },
+  });
+  const looseItems: DrawerItem[] = looseRaw.map((it) => ({
+    id: it.id,
+    name: it.name,
+    partNumber: it.partNumber,
+    quantity: it.quantity,
+    unit: it.unit,
+    imageUrl: it.imageUrl,
+    binId: null,
+    sortOrder: 0,
+    category: it.category ? { name: it.category.name, color: it.category.color } : null,
+  }));
 
   const drawers: DrawerSummary[] = box.drawers.map((d) => ({
     id: d.id,
@@ -75,6 +101,13 @@ export default async function BoxFrontPage({ params }: { params: { boxId: string
   const nextBoxId = idx >= 0 && idx < allBoxes.length - 1 ? allBoxes[idx + 1].id : null;
 
   return (
-    <BoxDetailClient box={detail} canManage={canManage} prevBoxId={prevBoxId} nextBoxId={nextBoxId} />
+    <BoxDetailClient
+      box={detail}
+      looseItems={looseItems}
+      canManage={canManage}
+      canReorganize={hasPermission(user, "boxes.reorganize")}
+      prevBoxId={prevBoxId}
+      nextBoxId={nextBoxId}
+    />
   );
 }

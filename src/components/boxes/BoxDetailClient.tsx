@@ -20,25 +20,57 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
+import { MoreVertical, FolderInput, PackageX, Package } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 import { BoxFrontView } from "./BoxFrontView";
 import { DrawerListView } from "./DrawerListView";
 import { DrawerForm } from "./DrawerForm";
 import { DrawerDeleteDialog } from "./DrawerDeleteDialog";
-import type { BoxDetail, DrawerSummary } from "./types";
+import { AssignToBoxDialog } from "./AssignToBoxDialog";
+import type { BoxDetail, DrawerSummary, DrawerItem } from "./types";
 
 interface BoxDetailClientProps {
   box: BoxDetail;
+  looseItems?: DrawerItem[];
   canManage: boolean;
+  canReorganize?: boolean;
   prevBoxId: string | null;
   nextBoxId: string | null;
 }
 
 type ViewMode = "front" | "list";
 
-export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDetailClientProps) {
+export function BoxDetailClient({
+  box,
+  looseItems = [],
+  canManage,
+  canReorganize = false,
+  prevBoxId,
+  nextBoxId,
+}: BoxDetailClientProps) {
   const router = useRouter();
   const [drawers, setDrawers] = React.useState<DrawerSummary[]>(box.drawers);
+  const [loose, setLoose] = React.useState<DrawerItem[]>(looseItems);
+  const [assignItem, setAssignItem] = React.useState<DrawerItem | null>(null);
+  React.useEffect(() => setLoose(looseItems), [looseItems]);
+
+  async function removeLooseFromBox(item: DrawerItem) {
+    setLoose((prev) => prev.filter((i) => i.id !== item.id));
+    try {
+      await api.post("/api/items/move", { itemId: item.id, boxId: null, drawerId: null, binId: null });
+      toast.success(`${item.name} removed from the box`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not remove item");
+      router.refresh();
+    }
+  }
   const [description, setDescription] = React.useState<string | null>(box.description);
   const [editingDesc, setEditingDesc] = React.useState(false);
   const [descDraft, setDescDraft] = React.useState("");
@@ -311,6 +343,76 @@ export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDet
           }}
           onDelete={(d) => setDeleting(d)}
           onReordered={setDrawers}
+        />
+      )}
+
+      {loose.length > 0 && (
+        <div className="space-y-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Package className="h-4 w-4 text-muted-foreground" />
+            In this box, no drawer ({loose.length})
+          </h2>
+          <div className="divide-y divide-border rounded-lg border border-border">
+            {loose.map((item) => (
+              <div key={item.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  {item.category?.color && (
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: item.category.color }}
+                    />
+                  )}
+                  <span className="truncate text-sm font-medium">{item.name}</span>
+                  {item.partNumber && (
+                    <span className="shrink-0 text-xs text-muted-foreground">{item.partNumber}</span>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge variant="outline">
+                    {item.quantity}
+                    {item.unit ? ` ${item.unit}` : ""}
+                  </Badge>
+                  {canReorganize && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger>
+                        <button
+                          type="button"
+                          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                          aria-label="Item actions"
+                        >
+                          <MoreVertical className="h-4 w-4" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => setAssignItem(item)}>
+                          <FolderInput /> Assign to drawer / box…
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem destructive onClick={() => removeLooseFromBox(item)}>
+                          <PackageX /> Remove from box
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {assignItem && (
+        <AssignToBoxDialog
+          open={assignItem !== null}
+          onOpenChange={(o) => !o && setAssignItem(null)}
+          itemId={assignItem.id}
+          itemName={assignItem.name}
+          defaultBoxId={box.id}
+          onAssigned={() => {
+            setLoose((prev) => prev.filter((i) => i.id !== assignItem.id));
+            setAssignItem(null);
+            router.refresh();
+          }}
         />
       )}
 
