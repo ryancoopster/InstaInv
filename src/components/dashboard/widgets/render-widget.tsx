@@ -11,6 +11,8 @@ import { SupplierWidget } from "@/components/dashboard/widgets/supplier-widget";
 import { ActivityWidget } from "@/components/dashboard/widgets/activity-widget";
 import { QuickActionsWidget } from "@/components/dashboard/widgets/quick-actions-widget";
 import { PriceWatchWidget } from "@/components/dashboard/widgets/price-watch-widget";
+import { OutOfStockWidget } from "@/components/dashboard/widgets/out-of-stock-widget";
+import { RecentItemsWidget } from "@/components/dashboard/widgets/recent-items-widget";
 
 // Pure dispatcher: widget type -> body. Kept separate from WidgetFrame so the
 // frame stays generic and the data wiring lives in one place.
@@ -46,6 +48,10 @@ export function RenderWidget({
           canManageItems={can("items.edit") || can("pricing.manage")}
         />
       );
+    case "outOfStock":
+      return <OutOfStockWidget rows={data.outOfStock} count={data.outOfStockCount} />;
+    case "recentItems":
+      return <RecentItemsWidget rows={data.recentItems} />;
     default:
       return null;
   }

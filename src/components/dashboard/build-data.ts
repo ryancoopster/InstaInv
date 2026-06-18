@@ -15,6 +15,7 @@ import type {
   SupplierValueDatum,
   ActivityRow,
   PriceWatchRow,
+  SimpleItemRow,
 } from "@/components/dashboard/data";
 
 export async function buildDashboardData(): Promise<DashboardData> {
@@ -29,6 +30,7 @@ export async function buildDashboardData(): Promise<DashboardData> {
     activityLogs,
     priceItems,
     priceErrorCount,
+    recentItemRows,
   ] = await Promise.all([
     prisma.item.findMany({
       select: {
@@ -79,6 +81,16 @@ export async function buildDashboardData(): Promise<DashboardData> {
       },
     }),
     prisma.item.count({ where: { priceFetchStatus: "error" } }),
+    prisma.item.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 6,
+      select: {
+        id: true,
+        name: true,
+        category: { select: { name: true } },
+        drawer: { select: { name: true, box: { select: { name: true } } } },
+      },
+    }),
   ]);
 
   // --- Derived metrics over the item list ---
@@ -171,6 +183,25 @@ export async function buildDashboardData(): Promise<DashboardData> {
     priceSource: it.priceSource ?? null,
   }));
 
+  // --- Out of stock (quantity at zero) ---
+  const locationOf = (it: (typeof items)[number]) =>
+    [it.drawer?.box?.name, it.drawer?.name].filter(Boolean).join(" / ") || null;
+  const outOfStockItems = items.filter((it) => it.quantity <= 0);
+  const outOfStock: SimpleItemRow[] = outOfStockItems.slice(0, 8).map((it) => ({
+    id: it.id,
+    name: it.name,
+    category: it.category?.name ?? null,
+    location: locationOf(it),
+  }));
+
+  // --- Recently added items ---
+  const recentItems: SimpleItemRow[] = recentItemRows.map((it) => ({
+    id: it.id,
+    name: it.name,
+    category: it.category?.name ?? null,
+    location: [it.drawer?.box?.name, it.drawer?.name].filter(Boolean).join(" / ") || null,
+  }));
+
   // --- KPI stat cards ---
   const kpis: KpiDatum[] = [
     {
@@ -246,6 +277,9 @@ export async function buildDashboardData(): Promise<DashboardData> {
     activity,
     priceWatch,
     priceErrorCount,
+    outOfStock,
+    outOfStockCount: outOfStockItems.length,
+    recentItems,
     generatedAt: new Date().toISOString(),
   };
 }

@@ -58,6 +58,13 @@ export interface PriceWatchRow {
   priceSource: string | null;
 }
 
+export interface SimpleItemRow {
+  id: string;
+  name: string;
+  category: string | null;
+  location: string | null;
+}
+
 export interface DashboardData {
   kpis: KpiDatum[];
   lowStock: LowStockRow[];
@@ -67,6 +74,9 @@ export interface DashboardData {
   activity: ActivityRow[];
   priceWatch: PriceWatchRow[];
   priceErrorCount: number;
+  outOfStock: SimpleItemRow[];
+  outOfStockCount: number;
+  recentItems: SimpleItemRow[];
   /** Greeting name + generated timestamp for the header. */
   generatedAt: string; // ISO
 }

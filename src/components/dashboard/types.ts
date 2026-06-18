@@ -20,7 +20,9 @@ export type WidgetType =
   | "supplierValue"
   | "recentActivity"
   | "quickActions"
-  | "priceWatch";
+  | "priceWatch"
+  | "outOfStock"
+  | "recentItems";
 
 /** Column span on the responsive 1/2/3-column grid. */
 export type WidgetSpan = 1 | 2 | 3;
@@ -108,6 +110,20 @@ export const WIDGET_META: Record<WidgetType, WidgetMeta> = {
     defaultSpan: 2,
     allowedSpans: [1, 2, 3],
     permission: "pricing.manage",
+  },
+  outOfStock: {
+    type: "outOfStock",
+    title: "Out of stock",
+    description: "Items currently at zero on-hand quantity.",
+    defaultSpan: 1,
+    allowedSpans: [1, 2, 3],
+  },
+  recentItems: {
+    type: "recentItems",
+    title: "Recently added",
+    description: "The newest items added to your inventory.",
+    defaultSpan: 1,
+    allowedSpans: [1, 2, 3],
   },
 };
 
