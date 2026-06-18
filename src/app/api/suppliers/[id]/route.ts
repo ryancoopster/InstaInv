@@ -2,13 +2,14 @@ import { route, ok } from "@/lib/http";
 import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/audit";
+import { webUrlSchema } from "@/lib/url";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
 
 const patchSchema = z.object({
   name: z.string().min(1).optional(),
-  website: z.string().trim().optional().nullable(),
+  website: webUrlSchema.optional().nullable(),
   email: z.string().trim().optional().nullable(),
   phone: z.string().trim().optional().nullable(),
   accountNo: z.string().trim().optional().nullable(),

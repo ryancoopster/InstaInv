@@ -1,11 +1,40 @@
+// Content-Security-Policy. Pragmatic for Next's App Router (inline hydration
+// scripts need 'unsafe-inline'), but locks down framing, plugins and base-uri.
+const CSP = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+  "img-src 'self' data: blob:",
+  "style-src 'self' 'unsafe-inline'",
+  "script-src 'self' 'unsafe-inline'",
+  "font-src 'self' data:",
+  "connect-src 'self'",
+  "form-action 'self'",
+].join("; ");
+
+const SECURITY_HEADERS = [
+  { key: "Content-Security-Policy", value: CSP },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=()" },
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains" },
+];
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Don't leak the framework/version.
+  poweredByHeader: false,
   // We run our own typecheck/lint in CI; don't block prototype builds on them.
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: false },
   images: {
-    remotePatterns: [{ protocol: "https", hostname: "**" }],
+    // Images are local uploads served from /uploads — no remote optimization, so
+    // we drop the wildcard remotePatterns that widened the Image Optimizer's SSRF
+    // surface. Add a specific allowlisted host here only if a CDN is introduced.
+    remotePatterns: [],
   },
   // tesseract.js / bwip-js etc. should stay external to the server bundle.
   experimental: {
@@ -13,9 +42,8 @@ const nextConfig = {
     // Enables src/instrumentation.ts (used to start the background price-fetch scheduler).
     instrumentationHook: true,
   },
-  // Allow large image/scan uploads to server actions / route handlers.
   async headers() {
-    return [];
+    return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
 };
 

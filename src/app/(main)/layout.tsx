@@ -29,6 +29,9 @@ export default async function MainLayout({
   const user = await getSessionUser();
   if (!user) redirect("/login");
 
+  // Force a password change (e.g. seeded admin, admin-reset) before any app access.
+  if (user.mustChangePassword) redirect("/change-password");
+
   const perms = effectivePermissions(user);
 
   // Enforce per-route authorization server-side (defense in depth beyond hiding nav links).

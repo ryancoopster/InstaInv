@@ -100,15 +100,6 @@ export function LoginForm({ from }: { from: string }) {
             {submitting ? "Signing in…" : "Sign in"}
           </Button>
         </form>
-
-        <div className="mt-5 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-          <p className="font-medium text-foreground">Seeded admin</p>
-          <p>
-            <code className="rounded bg-background px-1 py-0.5">admin@instainv.local</code>
-            {" / "}
-            <code className="rounded bg-background px-1 py-0.5">admin1234</code>
-          </p>
-        </div>
       </CardContent>
     </Card>
   );

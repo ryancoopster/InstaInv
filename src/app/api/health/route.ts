@@ -3,5 +3,6 @@ import { NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ ok: true, service: "instainv", time: new Date().toISOString() });
+  // Minimal liveness response — don't disclose service name/version/time to scanners.
+  return NextResponse.json({ ok: true });
 }

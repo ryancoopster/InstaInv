@@ -1,6 +1,6 @@
 import { route, ok, fail } from "@/lib/http";
-import { can } from "@/lib/auth";
 import { getPricingSettings, refreshMany } from "@/lib/pricing";
+import { timingSafeEqual } from "crypto";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -8,27 +8,21 @@ export const maxDuration = 60;
 // GET /api/pricing/cron — entry point for an EXTERNAL scheduler (Vercel Cron,
 // GitHub Actions, a host crontab, etc.) to trigger a stale-item refresh.
 //
-// Auth model:
-//  - If PRICING_CRON_SECRET is set, require it via the `Authorization: Bearer
-//    <secret>`, `x-cron-secret` header, or `?secret=` query param. This lets a
-//    headless scheduler call it without a session cookie.
-//  - If no secret is configured, fall back to requiring an authenticated user
-//    with pricing.manage (so the endpoint is never wide open).
+// Auth model: requires PRICING_CRON_SECRET via the `Authorization: Bearer
+// <secret>` or `x-cron-secret` header ONLY (never a query param — those leak via
+// logs/referrer). There is NO authenticated-session fallback: a side-effecting
+// GET must not be triggerable cross-site by a logged-in user's browser. Use the
+// permission-gated POST /api/pricing/refresh-all from the UI instead.
 export const GET = route(async (req: Request) => {
   const url = new URL(req.url);
   const secret = process.env.PRICING_CRON_SECRET?.trim();
 
-  if (secret) {
-    const provided =
-      bearer(req.headers.get("authorization")) ||
-      req.headers.get("x-cron-secret") ||
-      url.searchParams.get("secret");
-    if (provided !== secret) return fail("Invalid cron secret", 401);
-  } else {
-    // No secret configured — only allow an authenticated manager to trigger it.
-    if (!(await can("pricing.manage"))) {
-      return fail("Cron secret not configured; sign in with pricing.manage to trigger.", 401);
-    }
+  if (!secret) {
+    return fail("Cron is not configured. Set PRICING_CRON_SECRET to enable it.", 503);
+  }
+  const provided = bearer(req.headers.get("authorization")) || req.headers.get("x-cron-secret");
+  if (!provided || !safeEqual(provided, secret)) {
+    return fail("Invalid cron secret", 401);
   }
 
   const settings = await getPricingSettings();
@@ -45,4 +39,12 @@ function bearer(header: string | null): string | null {
   if (!header) return null;
   const m = /^Bearer\s+(.+)$/i.exec(header.trim());
   return m ? m[1] : null;
+}
+
+// Constant-time comparison (length-guarded so timingSafeEqual never throws).
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
 }

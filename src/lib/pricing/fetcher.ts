@@ -7,6 +7,7 @@ import "server-only";
 
 import { runParser } from "./parsers";
 import { normalizeParser, type PriceFetchResult, type PriceParser } from "./types";
+import { assertPublicUrl, safeFetch } from "@/lib/ssrf";
 
 // A believable desktop browser UA. Many sites 403 obvious bots; this helps a bit
 // but is not a guarantee — scraping is inherently best-effort.
@@ -52,6 +53,20 @@ export async function fetchItemPrice({ url, parser }: FetchItemPriceArgs): Promi
     };
   }
 
+  // SSRF guard: refuse links that resolve to private / loopback / link-local
+  // (cloud metadata) addresses before making any request.
+  const ssrf = await assertPublicUrl(parsed.toString());
+  if (!ssrf.ok) {
+    return {
+      price: null,
+      currency: "USD",
+      source: host,
+      success: false,
+      status: "error",
+      note: `Blocked link: ${ssrf.reason}`,
+    };
+  }
+
   // McMaster is known-unsupported regardless of fetch outcome: prices are gated
   // behind login + rendered by JS. Be honest and short-circuit with a clear note.
   if (strategy === "mcmaster") {
@@ -69,9 +84,10 @@ export async function fetchItemPrice({ url, parser }: FetchItemPriceArgs): Promi
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
 
   try {
-    const res = await fetch(parsed.toString(), {
+    // safeFetch re-validates every redirect hop so a 30x to an internal host
+    // can't bypass the up-front SSRF check.
+    const res = await safeFetch(parsed.toString(), {
       method: "GET",
-      redirect: "follow",
       signal: controller.signal,
       cache: "no-store",
       headers: {

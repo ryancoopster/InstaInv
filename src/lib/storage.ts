@@ -8,15 +8,25 @@ import crypto from "crypto";
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || "public/uploads";
 
+// Extension is derived from the validated content type, never the client
+// filename — so a crafted filename can't inject path separators or odd suffixes.
+const EXT_BY_TYPE: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+};
+
 function randomName(ext: string) {
-  return crypto.randomBytes(12).toString("hex") + (ext ? `.${ext.replace(/^\./, "")}` : "");
+  const clean = ext.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return crypto.randomBytes(12).toString("hex") + (clean ? `.${clean}` : "");
 }
 
-export async function saveUpload(file: File, subdir = ""): Promise<string> {
+export async function saveUpload(file: File, subdir = "", contentType?: string): Promise<string> {
   const driver = process.env.STORAGE_DRIVER || "local";
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  const ext = (contentType && EXT_BY_TYPE[contentType]) || "bin";
   const filename = randomName(ext);
 
   if (driver === "s3") {
@@ -24,12 +34,21 @@ export async function saveUpload(file: File, subdir = ""): Promise<string> {
     throw new Error("S3 storage not configured. Set STORAGE_DRIVER=local or implement S3 in lib/storage.ts.");
   }
 
-  const relDir = path.join(UPLOAD_DIR, subdir);
-  await fs.mkdir(relDir, { recursive: true });
-  await fs.writeFile(path.join(relDir, filename), buffer);
+  // Defense in depth against path traversal: sanitize the subdir and confirm the
+  // resolved directory stays inside UPLOAD_DIR before writing.
+  const safeSub = subdir.replace(/[^a-z0-9_-]/gi, "");
+  const relDir = path.join(UPLOAD_DIR, safeSub);
+  const root = path.resolve(UPLOAD_DIR);
+  const resolvedDir = path.resolve(relDir);
+  if (resolvedDir !== root && !resolvedDir.startsWith(root + path.sep)) {
+    throw new Error("Invalid upload path");
+  }
+
+  await fs.mkdir(resolvedDir, { recursive: true });
+  await fs.writeFile(path.join(resolvedDir, filename), buffer);
 
   // public/uploads/foo.png is served at /uploads/foo.png
-  const publicPath = path.join(UPLOAD_DIR.replace(/^public\/?/, ""), subdir, filename);
+  const publicPath = path.join(UPLOAD_DIR.replace(/^public\/?/, ""), safeSub, filename);
   return "/" + publicPath.split(path.sep).join("/");
 }
 

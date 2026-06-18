@@ -1,6 +1,7 @@
 import { route, ok, fail } from "@/lib/http";
 import { prisma } from "@/lib/prisma";
 import { requirePermission, hashPassword } from "@/lib/auth";
+import { passwordSchema } from "@/lib/password";
 import { logActivity } from "@/lib/audit";
 import { z } from "zod";
 import { serializeUser } from "./_serialize";
@@ -19,7 +20,7 @@ export const GET = route(async () => {
 const CreateSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
   email: z.string().trim().toLowerCase().email("Enter a valid email"),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  password: passwordSchema,
   userTypeId: z.string().min(1, "A role is required"),
   isActive: z.boolean().optional(),
 });
@@ -44,6 +45,8 @@ export const POST = route(async (req: Request) => {
       passwordHash,
       userTypeId: body.userTypeId,
       isActive: body.isActive ?? true,
+      // The admin sets an initial password; force the user to choose their own.
+      mustChangePassword: true,
       sortOrder: (last?.sortOrder ?? 0) + 1,
     },
     include: userInclude,

@@ -1,14 +1,22 @@
 import { route, ok, fail } from "@/lib/http";
 import { requirePermission } from "@/lib/auth";
+import { rateLimit } from "@/lib/rate-limit";
 import { createWorker, type Worker } from "tesseract.js";
 
 export const dynamic = "force-dynamic";
 // tesseract.js downloads its WASM core + traineddata at runtime — Node only.
 export const runtime = "nodejs";
-// OCR can take a while; give it room.
-export const maxDuration = 120;
+// OCR can take a while; give it room (but bounded to limit DoS impact).
+export const maxDuration = 60;
 
 const OCR_LANG = process.env.OCR_LANG || "eng";
+
+// OCR is CPU-expensive — throttle per user and cap global concurrency so it can't
+// be used to exhaust the server.
+const OCR_MAX_PER_WINDOW = 20;
+const OCR_WINDOW_SEC = 5 * 60;
+const OCR_MAX_CONCURRENT = 2;
+let activeOcrJobs = 0;
 
 interface OcrWord {
   text: string;
@@ -31,7 +39,19 @@ interface OcrResult {
 }
 
 export const POST = route(async (req: Request) => {
-  await requirePermission("ocr.scan");
+  const user = await requirePermission("ocr.scan");
+
+  // Per-user throttle.
+  const rl = rateLimit(`ocr:${user.id}`, OCR_MAX_PER_WINDOW, OCR_WINDOW_SEC);
+  if (!rl.ok) {
+    return fail("Too many OCR requests. Please wait a moment and try again.", 429, {
+      retryAfterSec: rl.retryAfterSec,
+    });
+  }
+  // Global concurrency cap so a burst can't pin every CPU.
+  if (activeOcrJobs >= OCR_MAX_CONCURRENT) {
+    return fail("The OCR engine is busy. Please try again shortly.", 503, { code: "OCR_BUSY" });
+  }
 
   const form = await req.formData();
   const file = form.get("image") ?? form.get("file");
@@ -48,6 +68,7 @@ export const POST = route(async (req: Request) => {
 
   const buffer = Buffer.from(await file.arrayBuffer());
 
+  activeOcrJobs += 1;
   let worker: Worker | null = null;
   try {
     // Worker / language initialization is the fragile part (it fetches the WASM
@@ -99,6 +120,7 @@ export const POST = route(async (req: Request) => {
       { code: "OCR_FAILED" },
     );
   } finally {
+    activeOcrJobs = Math.max(0, activeOcrJobs - 1);
     if (worker) {
       try {
         await worker.terminate();

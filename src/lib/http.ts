@@ -30,8 +30,15 @@ export function route<Args extends any[]>(
       if (err instanceof ZodError) {
         return fail("Validation failed", 422, { issues: err.flatten() });
       }
+      // Log full detail server-side, but never leak internal/Prisma error text to
+      // the client in production.
       console.error("[route error]", err);
-      const message = err instanceof Error ? err.message : "Unexpected error";
+      const message =
+        process.env.NODE_ENV === "production"
+          ? "Internal server error"
+          : err instanceof Error
+            ? err.message
+            : "Unexpected error";
       return fail(message, 500);
     }
   };

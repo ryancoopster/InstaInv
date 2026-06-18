@@ -1,8 +1,14 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import { presetBasicUser, presetManager } from "../src/lib/permissions";
 
 const prisma = new PrismaClient();
+
+// Strong random temporary password for seeded accounts (changed on first login).
+function genTempPassword(): string {
+  return crypto.randomBytes(18).toString("base64url");
+}
 
 async function main() {
   console.log("Seeding InstaInv…");
@@ -27,27 +33,34 @@ async function main() {
   });
 
   // ---- Default admin user -------------------------------------------------
+  // No hard-coded fallback password. If SEED_ADMIN_PASSWORD is unset, generate a
+  // strong random one and print it once below. Either way the account must change
+  // it on first login.
   const adminEmail = process.env.SEED_ADMIN_EMAIL || "admin@instainv.local";
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD || "admin1234";
+  const generatedAdminPw = process.env.SEED_ADMIN_PASSWORD ? null : genTempPassword();
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || generatedAdminPw!;
   await prisma.user.upsert({
     where: { email: adminEmail },
     update: {},
     create: {
       email: adminEmail,
       name: "Admin",
-      passwordHash: await bcrypt.hash(adminPassword, 10),
+      passwordHash: await bcrypt.hash(adminPassword, 12),
       userTypeId: adminType.id,
+      mustChangePassword: true,
     },
   });
 
+  const generatedTechPw = genTempPassword();
   await prisma.user.upsert({
     where: { email: "tech@instainv.local" },
     update: {},
     create: {
       email: "tech@instainv.local",
       name: "Sample Technician",
-      passwordHash: await bcrypt.hash("tech1234", 10),
+      passwordHash: await bcrypt.hash(generatedTechPw, 12),
       userTypeId: basicType.id,
+      mustChangePassword: true,
     },
   });
 
@@ -253,7 +266,11 @@ async function main() {
     });
   }
 
-  console.log(`Done. Admin login: ${adminEmail} / ${adminPassword}`);
+  console.log(`Done. Admin email: ${adminEmail}`);
+  if (generatedAdminPw) {
+    console.log(`  Temporary admin password (must change on first login): ${generatedAdminPw}`);
+    console.log(`  Temporary technician password: ${generatedTechPw}`);
+  }
 }
 
 main()

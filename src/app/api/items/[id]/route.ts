@@ -6,6 +6,7 @@ import { deleteUpload } from "@/lib/storage";
 import { logActivity } from "@/lib/audit";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
+import { webUrlSchema } from "@/lib/url";
 import { itemInclude, serializeItem } from "../_serialize";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,7 @@ const patchSchema = z.object({
   minQuantity: z.number().int().optional(),
   imageUrl: z.string().trim().optional().nullable(),
   supplierId: z.string().trim().optional().nullable(),
-  supplierLink: z.string().trim().optional().nullable(),
+  supplierLink: webUrlSchema.optional().nullable(),
   categoryId: z.string().trim().optional().nullable(),
   customValues: z.record(z.any()).optional(),
   drawerId: z.string().trim().optional().nullable(),

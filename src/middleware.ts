@@ -1,19 +1,28 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
+import { SECRET_KEY } from "@/lib/secret";
 
 const SESSION_COOKIE = "instainv_session";
 
-const secretKey = () =>
-  new TextEncoder().encode(process.env.AUTH_SECRET || "dev-only-insecure-secret-change-me-32chars!");
-
-// Routes that never require auth.
-const PUBLIC_PREFIXES = ["/login", "/api/auth/login", "/api/auth/logout", "/api/health", "/_next", "/favicon", "/uploads"];
+// Routes that never require a session. /api/pricing/cron is here because it
+// authenticates with its own PRICING_CRON_SECRET header (for external schedulers
+// that have no cookie); the route handler enforces that secret itself.
+const PUBLIC_PREFIXES = [
+  "/login",
+  "/api/auth/login",
+  "/api/auth/logout",
+  "/api/health",
+  "/api/pricing/cron",
+  "/_next",
+  "/favicon",
+  "/uploads",
+];
 
 async function isAuthed(req: NextRequest): Promise<boolean> {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (!token) return false;
   try {
-    await jwtVerify(token, secretKey());
+    await jwtVerify(token, SECRET_KEY);
     return true;
   } catch {
     return false;

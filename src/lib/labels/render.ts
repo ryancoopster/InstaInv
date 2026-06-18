@@ -85,18 +85,24 @@ async function barcodePng(value: string, symbology: string, widthPx: number, hei
 
 async function loadUploadBytes(src: string): Promise<Buffer | null> {
   try {
-    if (/^https?:\/\//i.test(src)) {
-      const res = await fetch(src);
-      if (!res.ok) return null;
-      return Buffer.from(await res.arrayBuffer());
-    }
+    // SSRF hardening: do NOT fetch arbitrary remote URLs server-side. Label
+    // images are local uploads or inline data: URIs; remote http(s) sources are
+    // intentionally unsupported so a crafted src can't probe internal hosts.
     if (src.startsWith("data:")) {
       const base64 = src.split(",")[1] || "";
       return Buffer.from(base64, "base64");
     }
-    // local public path, e.g. /uploads/foo.png
-    const rel = path.join("public", src.replace(/^\//, ""));
-    return await fs.readFile(rel);
+    if (/^https?:\/\//i.test(src)) {
+      return null;
+    }
+    // local public path only, e.g. /uploads/foo.png — confined to public/uploads.
+    const cleaned = src.replace(/^\//, "");
+    const uploadsRoot = path.resolve("public", "uploads");
+    const resolved = path.resolve("public", cleaned);
+    if (resolved !== uploadsRoot && !resolved.startsWith(uploadsRoot + path.sep)) {
+      return null;
+    }
+    return await fs.readFile(resolved);
   } catch {
     return null;
   }

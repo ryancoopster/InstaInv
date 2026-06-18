@@ -49,6 +49,10 @@ model User {
   permissionOverrides Json @default("{}")
   // Per-user dashboard layout (widgets, order, size, visibility). Null = use default.
   dashboardConfig Json?
+  // Bumped on logout / password change to invalidate all previously-issued JWTs.
+  tokenVersion Int       @default(0)
+  // Forces the user through a password change before any other action (seeded admin).
+  mustChangePassword Boolean @default(false)
   sortOrder    Int       @default(0)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())

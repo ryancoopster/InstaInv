@@ -15,11 +15,19 @@ export const PATCH = route(async (req: Request) => {
   }
   const { ids } = schema.parse(await req.json());
 
-  await prisma.$transaction(
+  // Object-level authz: a user without orders.viewAll may only reorder their OWN
+  // requests. updateMany with an ownership filter silently no-ops on rows they
+  // don't own (instead of writing them or throwing).
+  const canViewAll = hasPermission(user, "orders.viewAll");
+  const results = await prisma.$transaction(
     ids.map((id, index) =>
-      prisma.orderRequest.update({ where: { id }, data: { sortOrder: index } }),
+      prisma.orderRequest.updateMany({
+        where: canViewAll ? { id } : { id, requestedById: user.id },
+        data: { sortOrder: index },
+      }),
     ),
   );
 
-  return ok({ updated: ids.length });
+  const updated = results.reduce((n, r) => n + r.count, 0);
+  return ok({ updated });
 });
