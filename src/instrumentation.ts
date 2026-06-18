@@ -73,4 +73,31 @@ export async function register() {
   } catch (err) {
     console.error("[pricing] failed to start scheduler", err);
   }
+
+  // --- Approve/deny digest email scheduler -------------------------------
+  try {
+    const { compileAndSendDue } = await import("@/lib/notifications/service");
+    // Check every minute; the per-user debounce window (Setting('notifications')
+    // .delayMinutes, default 5) gates when a digest is actually sent.
+    const NOTIF_TICK_MS = 60 * 1000;
+    let notifRunning = false;
+    const notifTimer = setInterval(() => {
+      void (async () => {
+        if (notifRunning) return;
+        notifRunning = true;
+        try {
+          const res = await compileAndSendDue();
+          if (res.sent > 0) console.info("[notifications] sent digests", res);
+        } catch (e) {
+          console.error("[notifications] tick failed", e);
+        } finally {
+          notifRunning = false;
+        }
+      })();
+    }, NOTIF_TICK_MS);
+    if (typeof notifTimer.unref === "function") notifTimer.unref();
+    console.info("[notifications] digest scheduler started (tick every 1m; debounce honors Setting('notifications'))");
+  } catch (err) {
+    console.error("[notifications] failed to start scheduler", err);
+  }
 }

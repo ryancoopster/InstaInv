@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/audit";
 import { refreshLocationSummaries } from "@/lib/summary";
 import { buildPurchaseData } from "@/lib/purchases";
+import { enqueueDecision } from "@/lib/notifications/service";
 import { z } from "zod";
 import { serializeRequest, requestInclude } from "@/components/orders/serialize";
 
@@ -148,6 +149,11 @@ export const PATCH = route(async (req: Request, { params }: Ctx) => {
     entityId: updated.id,
     meta: { status: updated.status, appliedToStock: shouldApplyStock },
   });
+
+  // Queue a digest notification to the requester on approve/deny.
+  if ((body.status === "APPROVED" || body.status === "REJECTED") && existing.requestedById) {
+    void enqueueDecision(existing.requestedById, params.id, body.status);
+  }
 
   return ok(serializeRequest(updated));
 });

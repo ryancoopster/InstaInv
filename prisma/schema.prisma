@@ -62,6 +62,7 @@ model User {
   approvedRequests   OrderRequest[] @relation("approvedBy")
   activityLogs       ActivityLog[]
   purchases          Purchase[]     @relation("purchasedBy")
+  decisionNotifications PendingDecisionNotification[]
 }
 
 model ActivityLog {
@@ -354,6 +355,7 @@ model OrderRequest {
   updatedAt     DateTime @updatedAt
 
   purchases     Purchase[]
+  decisionNotifications PendingDecisionNotification[]
 
   @@index([status])
   @@index([supplierId])
@@ -397,6 +399,27 @@ model Setting {
   key       String   @id
   value     Json     @default("{}")
   updatedAt DateTime @updatedAt
+}
+
+// ---------------------------------------------------------------------------
+// Pending approve/deny notifications. Each decision enqueues a row; a scheduled
+// job (instrumentation.ts / cron) waits a debounce window then sends ONE digest
+// email per user covering all their not-yet-sent decisions, marking them sent.
+// ---------------------------------------------------------------------------
+
+model PendingDecisionNotification {
+  id             String       @id @default(cuid())
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  orderRequestId String
+  orderRequest   OrderRequest @relation(fields: [orderRequestId], references: [id], onDelete: Cascade)
+  decision       String // "APPROVED" | "REJECTED"
+  decidedAt      DateTime     @default(now())
+  sentAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  @@index([sentAt, decidedAt])
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------
