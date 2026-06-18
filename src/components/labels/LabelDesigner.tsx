@@ -15,6 +15,13 @@ import {
   ArrowLeft,
   Trash2,
   Loader2,
+  Undo2,
+  Redo2,
+  BringToFront,
+  SendToBack,
+  ChevronUp,
+  ChevronDown,
+  Copy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,8 +62,12 @@ function newElement(type: ElementType, widthMm: number, heightMm: number): Label
       return { ...base, w: 18, h: 18 };
     case "rect":
       return { ...base, w: Math.min(20, widthMm - 4), h: 10, stroke: "#000000", fill: "none", strokeWidth: 0.3 };
+    case "ellipse":
+      return { ...base, w: Math.min(20, widthMm - 4), h: Math.min(20, heightMm - 4), stroke: "#000000", fill: "none", strokeWidth: 0.3 };
     case "line":
       return { ...base, w: Math.min(30, widthMm - 4), h: 2, stroke: "#000000", strokeWidth: 0.3 };
+    case "arrow":
+      return { ...base, w: Math.min(30, widthMm - 4), h: 6, stroke: "#000000", strokeWidth: 0.4 };
     default:
       return base as LabelElement;
   }
@@ -132,42 +143,156 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
     }
   }
 
-  // ---- element mutation helpers ----
-  const markDirty = () => setDirty(true);
+  // ---- undo/redo history ----
+  const pastRef = React.useRef<LabelContent[]>([]);
+  const futureRef = React.useRef<LabelContent[]>([]);
+  const sessionRef = React.useRef(false);
+  const clipboardRef = React.useRef<LabelElement | null>(null);
+  const [, forceTick] = React.useReducer((x) => x + 1, 0);
 
-  function patchElement(id: string, patch: Partial<LabelElement>) {
-    setContent((c) => ({ ...c, elements: c.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+  const markDirty = () => setDirty(true);
+  const cloneContent = (c: LabelContent): LabelContent => JSON.parse(JSON.stringify(c));
+  function pushPast(c: LabelContent) {
+    pastRef.current.push(cloneContent(c));
+    if (pastRef.current.length > 60) pastRef.current.shift();
+    futureRef.current = [];
   }
 
+  // Atomic, undoable mutation (snapshots the pre-state inside the updater).
+  function apply(fn: (c: LabelContent) => LabelContent) {
+    setContent((c) => {
+      pushPast(c);
+      return fn(c);
+    });
+    markDirty();
+    sessionRef.current = false;
+    forceTick();
+  }
+
+  // For continuous edits (drag / typing): snapshot once at the start of a session.
+  function beginEditSession() {
+    if (sessionRef.current) return;
+    sessionRef.current = true;
+    setContent((c) => {
+      pushPast(c);
+      return c;
+    });
+    forceTick();
+  }
+  function endEditSession() {
+    sessionRef.current = false;
+  }
+  function patchLive(id: string, patch: Partial<LabelElement>) {
+    setContent((c) => ({ ...c, elements: c.elements.map((e) => (e.id === id ? { ...e, ...patch } : e)) }));
+    markDirty();
+  }
+
+  function undo() {
+    setContent((cur) => {
+      if (pastRef.current.length === 0) return cur;
+      futureRef.current.push(cloneContent(cur));
+      return pastRef.current.pop()!;
+    });
+    markDirty();
+    sessionRef.current = false;
+    forceTick();
+  }
+  function redo() {
+    setContent((cur) => {
+      if (futureRef.current.length === 0) return cur;
+      pastRef.current.push(cloneContent(cur));
+      return futureRef.current.pop()!;
+    });
+    markDirty();
+    sessionRef.current = false;
+    forceTick();
+  }
+
+  // ---- element mutation helpers ----
   function addElement(type: ElementType) {
     const el = newElement(type, widthMm, heightMm);
-    setContent((c) => ({ ...c, elements: [...c.elements, el] }));
+    apply((c) => ({ ...c, elements: [...c.elements, el] }));
     setSelectedId(el.id);
-    markDirty();
   }
 
   function deleteElement(id: string) {
-    setContent((c) => ({ ...c, elements: c.elements.filter((e) => e.id !== id) }));
+    apply((c) => ({ ...c, elements: c.elements.filter((e) => e.id !== id) }));
     if (selectedId === id) setSelectedId(null);
-    markDirty();
   }
 
   function toggleHidden(id: string) {
-    setContent((c) => ({ ...c, elements: c.elements.map((e) => (e.id === id ? { ...e, hidden: !e.hidden } : e)) }));
-    markDirty();
+    apply((c) => ({ ...c, elements: c.elements.map((e) => (e.id === id ? { ...e, hidden: !e.hidden } : e)) }));
   }
 
   function reorderLayers(ids: string[]) {
-    setContent((c) => {
+    apply((c) => {
       const map = new Map(c.elements.map((e) => [e.id, e]));
       return { ...c, elements: ids.map((id) => map.get(id)!).filter(Boolean) };
     });
-    markDirty();
   }
 
   function setBackground(hex: string) {
-    setContent((c) => ({ ...c, background: hex }));
-    markDirty();
+    apply((c) => ({ ...c, background: hex }));
+  }
+
+  // ---- z-order ----
+  function bringToFront(id: string) {
+    apply((c) => {
+      const el = c.elements.find((e) => e.id === id);
+      if (!el) return c;
+      return { ...c, elements: [...c.elements.filter((e) => e.id !== id), el] };
+    });
+  }
+  function sendToBack(id: string) {
+    apply((c) => {
+      const el = c.elements.find((e) => e.id === id);
+      if (!el) return c;
+      return { ...c, elements: [el, ...c.elements.filter((e) => e.id !== id)] };
+    });
+  }
+  function bringForward(id: string) {
+    apply((c) => {
+      const i = c.elements.findIndex((e) => e.id === id);
+      if (i < 0 || i === c.elements.length - 1) return c;
+      const arr = [...c.elements];
+      [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]];
+      return { ...c, elements: arr };
+    });
+  }
+  function sendBackward(id: string) {
+    apply((c) => {
+      const i = c.elements.findIndex((e) => e.id === id);
+      if (i <= 0) return c;
+      const arr = [...c.elements];
+      [arr[i], arr[i - 1]] = [arr[i - 1], arr[i]];
+      return { ...c, elements: arr };
+    });
+  }
+
+  // ---- copy / paste / duplicate ----
+  function placedCopy(src: LabelElement): LabelElement {
+    return {
+      ...JSON.parse(JSON.stringify(src)),
+      id: cuidish(),
+      x: clamp(src.x + 2, 0, Math.max(0, widthMm - src.w)),
+      y: clamp(src.y + 2, 0, Math.max(0, heightMm - src.h)),
+    };
+  }
+  function duplicateElement(id: string) {
+    const src = content.elements.find((e) => e.id === id);
+    if (!src) return;
+    const copy = placedCopy(src);
+    apply((c) => ({ ...c, elements: [...c.elements, copy] }));
+    setSelectedId(copy.id);
+  }
+  function copySelected() {
+    if (selected) clipboardRef.current = JSON.parse(JSON.stringify(selected));
+  }
+  function paste() {
+    if (!clipboardRef.current) return;
+    const copy = placedCopy(clipboardRef.current);
+    apply((c) => ({ ...c, elements: [...c.elements, copy] }));
+    setSelectedId(copy.id);
   }
 
   // ---- keyboard: nudge / delete ----
@@ -193,16 +318,53 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
       else if (e.key === "ArrowDown") dy = step;
       else return;
       e.preventDefault();
-      patchElement(selectedId, {
+      beginEditSession();
+      patchLive(selectedId, {
         x: clamp(Math.round((el.x + dx) * 100) / 100, 0, widthMm - el.w),
         y: clamp(Math.round((el.y + dy) * 100) / 100, 0, heightMm - el.h),
       });
-      markDirty();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, content.elements, gridMm, widthMm, heightMm]);
+
+  // End any open edit session when the selection changes.
+  React.useEffect(() => {
+    sessionRef.current = false;
+  }, [selectedId]);
+
+  // ---- keyboard: undo/redo, copy/paste, duplicate ----
+  React.useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod) return;
+      const target = e.target as HTMLElement;
+      const inField =
+        target?.tagName === "INPUT" || target?.tagName === "TEXTAREA" || target?.isContentEditable;
+      const k = e.key.toLowerCase();
+      if (k === "z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (k === "y") {
+        e.preventDefault();
+        redo();
+      } else if (k === "c" && !inField && selectedId) {
+        e.preventDefault();
+        copySelected();
+      } else if (k === "v" && !inField) {
+        e.preventDefault();
+        paste();
+      } else if (k === "d" && !inField && selectedId) {
+        e.preventDefault();
+        duplicateElement(selectedId);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, content.elements]);
 
   // ---- save ----
   async function save() {
@@ -287,6 +449,30 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
           Preview
         </Button>
 
+        <div className="mx-1 h-6 w-px bg-border" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={undo}
+          disabled={pastRef.current.length === 0}
+          aria-label="Undo"
+          title="Undo (⌘/Ctrl+Z)"
+        >
+          <Undo2 className="h-4 w-4" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={redo}
+          disabled={futureRef.current.length === 0}
+          aria-label="Redo"
+          title="Redo (⇧⌘/Ctrl+Z)"
+        >
+          <Redo2 className="h-4 w-4" />
+        </Button>
+
         <div className="ml-auto flex items-center gap-2">
           {canPrint && (
             <>
@@ -350,10 +536,28 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
                 </option>
               ))}
             </Select>
-            {selected && (
-              <Button variant="ghost" size="sm" className="ml-auto gap-1.5 text-destructive" onClick={() => deleteElement(selected.id)}>
-                <Trash2 className="h-3.5 w-3.5" /> Delete selected
-              </Button>
+            {selected && canDesign && (
+              <div className="ml-auto flex items-center gap-0.5">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => bringToFront(selected.id)} title="Bring to front">
+                  <BringToFront className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => bringForward(selected.id)} title="Bring forward">
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => sendBackward(selected.id)} title="Send backward">
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => sendToBack(selected.id)} title="Send to back">
+                  <SendToBack className="h-3.5 w-3.5" />
+                </Button>
+                <div className="mx-1 h-5 w-px bg-border" />
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => duplicateElement(selected.id)} title="Duplicate (⌘/Ctrl+D)">
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => deleteElement(selected.id)} title="Delete (Del)">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             )}
           </div>
           <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto rounded-lg border border-border bg-muted/40 p-6 [background-image:radial-gradient(circle,theme(colors.border)_1px,transparent_1px)] [background-size:16px_16px]">
@@ -370,8 +574,12 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
               entity={entity}
               preview={preview}
               onSelect={setSelectedId}
-              onChange={(id, patch) => patchElement(id, patch)}
-              onCommit={markDirty}
+              onBeginEdit={beginEditSession}
+              onChange={(id, patch) => patchLive(id, patch)}
+              onCommit={() => {
+                endEditSession();
+                markDirty();
+              }}
             />
           </div>
         </div>
@@ -386,8 +594,16 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
               element={selected}
               target={target}
               customKeys={customKeys}
-              onChange={(patch) => selected && patchElement(selected.id, patch)}
-              onCommit={markDirty}
+              onChange={(patch) => {
+                if (selected) {
+                  beginEditSession();
+                  patchLive(selected.id, patch);
+                }
+              }}
+              onCommit={() => {
+                endEditSession();
+                markDirty();
+              }}
             />
           </Card>
         </div>

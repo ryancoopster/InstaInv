@@ -19,7 +19,7 @@ export const GET = route(async (_req: Request, ctx: Ctx) => {
 const elementSchema = z
   .object({
     id: z.string(),
-    type: z.enum(["text", "qrcode", "barcode", "image", "rect", "line"]),
+    type: z.enum(["text", "qrcode", "barcode", "image", "rect", "line", "ellipse", "arrow"]),
     x: z.number(),
     y: z.number(),
     w: z.number(),

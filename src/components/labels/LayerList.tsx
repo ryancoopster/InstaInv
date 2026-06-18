@@ -28,6 +28,8 @@ import {
   Image as ImageIcon,
   Square,
   Minus,
+  Circle,
+  MoveRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ElementType, LabelElement } from "@/lib/labels/types";
@@ -38,7 +40,9 @@ const ICONS: Record<ElementType, React.ElementType> = {
   barcode: Barcode,
   image: ImageIcon,
   rect: Square,
+  ellipse: Circle,
   line: Minus,
+  arrow: MoveRight,
 };
 
 function describe(el: LabelElement): string {
@@ -53,8 +57,12 @@ function describe(el: LabelElement): string {
       return el.src ? "Image" : "Image (empty)";
     case "rect":
       return "Rectangle";
+    case "ellipse":
+      return "Ellipse";
     case "line":
       return "Line";
+    case "arrow":
+      return "Arrow";
     default:
       return el.type;
   }

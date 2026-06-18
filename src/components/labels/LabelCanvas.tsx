@@ -75,6 +75,7 @@ export function LabelCanvas({
   entity,
   preview,
   onSelect,
+  onBeginEdit,
   onChange,
   onCommit,
 }: {
@@ -90,6 +91,7 @@ export function LabelCanvas({
   entity: EntityData | null;
   preview: boolean;
   onSelect: (id: string | null) => void;
+  onBeginEdit?: () => void;
   onChange: (id: string, patch: Partial<LabelElement>) => void;
   onCommit?: () => void;
 }) {
@@ -121,6 +123,7 @@ export function LabelCanvas({
     const { x, y } = pointerMm(e);
     dragRef.current = { mode, handle, startX: x, startY: y, orig: { ...el } };
     onSelect(el.id);
+    onBeginEdit?.();
   }
 
   React.useEffect(() => {
@@ -254,9 +257,25 @@ function ElementShape({
     case "rect":
       body = <rect x={x} y={y} width={w} height={h} fill={el.fill && el.fill !== "none" ? el.fill : "transparent"} stroke={el.stroke || "#000000"} strokeWidth={(el.strokeWidth ?? 0.3) * zoom} />;
       break;
+    case "ellipse":
+      body = <ellipse cx={x + w / 2} cy={y + h / 2} rx={w / 2} ry={h / 2} fill={el.fill && el.fill !== "none" ? el.fill : "transparent"} stroke={el.stroke || "#000000"} strokeWidth={(el.strokeWidth ?? 0.3) * zoom} />;
+      break;
     case "line":
       body = <line x1={x} y1={y + h / 2} x2={x + w} y2={y + h / 2} stroke={el.stroke || "#000000"} strokeWidth={(el.strokeWidth ?? 0.3) * zoom} />;
       break;
+    case "arrow": {
+      const sw = (el.strokeWidth ?? 0.4) * zoom;
+      const ay = y + h / 2;
+      const head = Math.min(w * 0.4, Math.max(6, sw * 4));
+      const stroke = el.stroke || "#000000";
+      body = (
+        <g>
+          <line x1={x} y1={ay} x2={x + w - head} y2={ay} stroke={stroke} strokeWidth={sw} />
+          <polygon points={`${x + w},${ay} ${x + w - head},${ay - head * 0.6} ${x + w - head},${ay + head * 0.6}`} fill={stroke} />
+        </g>
+      );
+      break;
+    }
     case "image":
       body = el.src ? (
         <image x={x} y={y} width={w} height={h} href={el.src} preserveAspectRatio="xMidYMid meet" />

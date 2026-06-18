@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Type, QrCode, Barcode, Image as ImageIcon, Square, Minus } from "lucide-react";
+import { Type, QrCode, Barcode, Image as ImageIcon, Square, Minus, Circle, MoveRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { ElementType } from "@/lib/labels/types";
 
@@ -11,7 +11,9 @@ const ITEMS: { type: ElementType; label: string; icon: React.ElementType }[] = [
   { type: "barcode", label: "Barcode", icon: Barcode },
   { type: "image", label: "Image", icon: ImageIcon },
   { type: "rect", label: "Rectangle", icon: Square },
+  { type: "ellipse", label: "Ellipse", icon: Circle },
   { type: "line", label: "Line", icon: Minus },
+  { type: "arrow", label: "Arrow", icon: MoveRight },
 ];
 
 export function ElementPalette({ onAdd, disabled }: { onAdd: (type: ElementType) => void; disabled?: boolean }) {

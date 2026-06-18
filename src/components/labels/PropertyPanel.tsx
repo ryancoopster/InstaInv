@@ -234,12 +234,12 @@ export function PropertyPanel({
         </section>
       )}
 
-      {/* Rect / line */}
-      {(el.type === "rect" || el.type === "line") && (
+      {/* Rect / ellipse / line / arrow */}
+      {(el.type === "rect" || el.type === "ellipse" || el.type === "line" || el.type === "arrow") && (
         <section className="space-y-2">
           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stroke & fill</h4>
           <ColorField label="Stroke" value={el.stroke || "#000000"} onChange={(v) => set({ stroke: v })} onCommit={onCommit} />
-          {el.type === "rect" && (
+          {(el.type === "rect" || el.type === "ellipse") && (
             <div className="space-y-1">
               <Label className="text-xs">Fill</Label>
               <div className="flex items-center gap-2">

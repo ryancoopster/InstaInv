@@ -6,9 +6,18 @@
 
 export type LabelTargetKind = "ITEM" | "BIN" | "DRAWER" | "BOX" | "GENERIC";
 
-export type ElementType = "text" | "qrcode" | "barcode" | "image" | "rect" | "line";
+export type ElementType =
+  | "text"
+  | "qrcode"
+  | "barcode"
+  | "image"
+  | "rect"
+  | "line"
+  | "ellipse"
+  | "arrow";
 
 export type TextAlign = "left" | "center" | "right";
+export type VerticalAlign = "top" | "middle" | "bottom";
 
 export interface LabelElement {
   id: string;
@@ -27,8 +36,14 @@ export interface LabelElement {
   fontFamily?: string;
   bold?: boolean;
   italic?: boolean;
+  underline?: boolean;
   align?: TextAlign;
+  valign?: VerticalAlign;
   color?: string;
+  lineHeight?: number; // multiple of font size (default 1.18)
+  letterSpacing?: number; // pt tracking
+  wrap?: boolean; // word-wrap to the box width
+  autoFit?: boolean; // shrink font to fit the box
 
   // barcode / qrcode
   binding?: string; // a binding token path, e.g. "item.url"

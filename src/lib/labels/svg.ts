@@ -69,8 +69,22 @@ function renderElementSvg(
   switch (el.type) {
     case "rect":
       return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${esc(el.fill || "none")}" stroke="${esc(el.stroke || "#000000")}" stroke-width="${px(el.strokeWidth ?? 0.3)}"${transform}/>`;
+    case "ellipse":
+      return `<ellipse cx="${x + w / 2}" cy="${y + h / 2}" rx="${w / 2}" ry="${h / 2}" fill="${esc(el.fill || "none")}" stroke="${esc(el.stroke || "#000000")}" stroke-width="${px(el.strokeWidth ?? 0.3)}"${transform}/>`;
     case "line":
       return `<line x1="${x}" y1="${y + h / 2}" x2="${x + w}" y2="${y + h / 2}" stroke="${esc(el.stroke || "#000000")}" stroke-width="${px(el.strokeWidth ?? 0.3)}"${transform}/>`;
+    case "arrow": {
+      const stroke = esc(el.stroke || "#000000");
+      const sw = px(el.strokeWidth ?? 0.4);
+      const cyv = y + h / 2;
+      const head = Math.min(w * 0.4, Math.max(6, sw * 4));
+      return (
+        `<g${transform}>` +
+        `<line x1="${x}" y1="${cyv}" x2="${x + w - head}" y2="${cyv}" stroke="${stroke}" stroke-width="${sw}"/>` +
+        `<polygon points="${x + w},${cyv} ${x + w - head},${cyv - head * 0.6} ${x + w - head},${cyv + head * 0.6}" fill="${stroke}"/>` +
+        `</g>`
+      );
+    }
     case "image":
       return el.src
         ? `<image x="${x}" y="${y}" width="${w}" height="${h}" href="${esc(el.src)}" preserveAspectRatio="xMidYMid meet"${transform}/>`

@@ -258,6 +258,19 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
         });
         break;
       }
+      case "ellipse": {
+        page.drawEllipse({
+          x: xPt + wPt / 2,
+          y: heightPt - (yTopPt + hPt / 2),
+          xScale: wPt / 2,
+          yScale: hPt / 2,
+          color: el.fill && el.fill !== "none" ? hexToRgb(el.fill) : undefined,
+          borderColor: hexToRgb(el.stroke || "#000000"),
+          borderWidth: mmToPt(el.strokeWidth ?? 0.3),
+          rotate: el.rotation ? degrees(-el.rotation) : undefined,
+        });
+        break;
+      }
       case "line": {
         const midY = heightPt - (yTopPt + hPt / 2);
         page.drawLine({
@@ -266,6 +279,17 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
           thickness: mmToPt(el.strokeWidth ?? 0.3),
           color: hexToRgb(el.stroke || "#000000"),
         });
+        break;
+      }
+      case "arrow": {
+        const sw = mmToPt(el.strokeWidth ?? 0.4);
+        const color = hexToRgb(el.stroke || "#000000");
+        const ay = heightPt - (yTopPt + hPt / 2);
+        const head = Math.min(wPt * 0.4, Math.max(mmToPt(2), sw * 4));
+        const tipX = xPt + wPt;
+        page.drawLine({ start: { x: xPt, y: ay }, end: { x: tipX - head, y: ay }, thickness: sw, color });
+        page.drawLine({ start: { x: tipX, y: ay }, end: { x: tipX - head, y: ay + head * 0.6 }, thickness: sw, color });
+        page.drawLine({ start: { x: tipX, y: ay }, end: { x: tipX - head, y: ay - head * 0.6 }, thickness: sw, color });
         break;
       }
       case "qrcode": {
