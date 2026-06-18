@@ -16,6 +16,7 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: { id: string };
+  searchParams?: { from?: string };
 }
 
 async function loadOptions() {
@@ -42,7 +43,7 @@ async function loadOptions() {
   return { categories, suppliers, boxes: boxesRaw as BoxOption[] };
 }
 
-export default async function ItemDetailPage({ params }: PageProps) {
+export default async function ItemDetailPage({ params, searchParams }: PageProps) {
   const isNew = params.id === "new";
 
   try {
@@ -54,10 +55,31 @@ export default async function ItemDetailPage({ params }: PageProps) {
   const { categories, suppliers, boxes } = await loadOptions();
 
   if (isNew) {
+    // Duplicate flow: /items/new?from=<sourceId> prefills from the source item.
+    let duplicateFrom: ItemRow | null = null;
+    let dupFields: CustomFieldDef[] = [];
+    if (searchParams?.from) {
+      const src = await prisma.item.findUnique({ where: { id: searchParams.from }, include: itemInclude });
+      if (src) {
+        duplicateFrom = serializeItem(src) as unknown as ItemRow;
+        if (duplicateFrom.categoryId) {
+          dupFields = (await prisma.customFieldDef.findMany({
+            where: { categoryId: duplicateFrom.categoryId },
+            orderBy: { sortOrder: "asc" },
+          })) as unknown as CustomFieldDef[];
+        }
+      }
+    }
     return (
       <div className="space-y-6">
-        <BackHeader title="New item" />
-        <ItemForm categories={categories} suppliers={suppliers} boxes={boxes} />
+        <BackHeader title={duplicateFrom ? `Duplicate "${duplicateFrom.name}"` : "New item"} />
+        <ItemForm
+          categories={categories}
+          suppliers={suppliers}
+          boxes={boxes}
+          duplicateFrom={duplicateFrom}
+          initialFields={dupFields}
+        />
       </div>
     );
   }

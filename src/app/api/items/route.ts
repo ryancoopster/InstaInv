@@ -1,4 +1,4 @@
-import { route, ok } from "@/lib/http";
+import { route, ok, fail } from "@/lib/http";
 import { requirePermission } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { refreshLocationSummaries } from "@/lib/summary";
@@ -68,6 +68,16 @@ export const GET = route(async (req: Request) => {
 export const POST = route(async (req: Request) => {
   const user = await requirePermission("items.create");
   const data = createSchema.parse(await req.json());
+
+  // Global, case-insensitive part-number uniqueness (DB enforces it too).
+  const pn = data.partNumber?.trim();
+  if (pn) {
+    const dupe = await prisma.item.findFirst({
+      where: { partNumber: { equals: pn, mode: "insensitive" } },
+      select: { id: true, name: true },
+    });
+    if (dupe) return fail(`Part number "${pn}" is already used by "${dupe.name}"`, 409);
+  }
 
   const max = await prisma.item.aggregate({ _max: { sortOrder: true } });
 

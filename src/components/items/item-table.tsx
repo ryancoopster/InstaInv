@@ -36,6 +36,7 @@ import { toast } from "@/components/ui/toast";
 import { usePermissions } from "@/components/shell/permission-context";
 import { SortableList, SortableRow, SortableHandle } from "./sortable";
 import { ItemForm } from "./item-form";
+import { ItemRowMenu } from "./item-row-menu";
 import type {
   ItemRow,
   CategoryOption,
@@ -203,6 +204,14 @@ export function ItemTable({
     setLoading(false);
   }
 
+  function handleDeleted(id: string) {
+    setItems((rows) => rows.filter((r) => r.id !== id));
+  }
+
+  function handleUpdated(updated: ItemRow) {
+    setItems((rows) => rows.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
+  }
+
   const orderedIds = sorted.map((i) => i.id);
 
   return (
@@ -307,6 +316,7 @@ export function ItemTable({
                 <SortHead label="Qty" align="right" active={sortKey === "quantity"} dir={sortDir} onClick={() => toggleSort("quantity")} />
                 <SortHead label="Desired" align="right" active={sortKey === "desiredQuantity"} dir={sortDir} onClick={() => toggleSort("desiredQuantity")} />
                 <TableHead className="text-right">Reorder</TableHead>
+                <TableHead className="w-8" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -454,6 +464,14 @@ export function ItemTable({
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
+                      </TableCell>
+                      <TableCell className="pl-0 text-right">
+                        <ItemRowMenu
+                          item={item}
+                          boxes={boxes}
+                          onDeleted={handleDeleted}
+                          onUpdated={handleUpdated}
+                        />
                       </TableCell>
                     </SortableRow>
                   );

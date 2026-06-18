@@ -71,6 +71,9 @@ interface ItemFormProps {
   boxes: BoxOption[];
   // Preloaded custom fields for the item's current category (avoids a flash).
   initialFields?: CustomFieldDef[];
+  // When creating a duplicate: prefill from this item; saving is blocked until the
+  // part number is changed (and the source partNumber, for the "changed" check).
+  duplicateFrom?: ItemRow | null;
   onSaved?: (item: ItemRow) => void;
   onDeleted?: (id: string) => void;
 }
@@ -81,6 +84,7 @@ export function ItemForm({
   suppliers,
   boxes,
   initialFields = [],
+  duplicateFrom,
   onSaved,
   onDeleted,
 }: ItemFormProps) {
@@ -90,7 +94,11 @@ export function ItemForm({
   const canEdit = isNew ? can("items.create") : can("items.edit");
   const canDelete = can("items.delete");
 
-  const [state, setState] = React.useState<ItemFormState>(() => toState(item));
+  // Source for prefill: the item being edited, or the item being duplicated.
+  const source = item ?? duplicateFrom ?? null;
+  const dupPartNumber = duplicateFrom?.partNumber?.trim().toLowerCase() ?? null;
+
+  const [state, setState] = React.useState<ItemFormState>(() => toState(source));
   const [fields, setFields] = React.useState<CustomFieldDef[]>(initialFields);
   const [saving, setSaving] = React.useState(false);
   const [deleting, setDeleting] = React.useState(false);
@@ -195,6 +203,13 @@ export function ItemForm({
 
   const disabled = !canEdit || saving;
 
+  // Duplicate mode: block saving until the part number is non-empty AND different
+  // from the source item's (global part numbers must be unique).
+  const partNumberChanged =
+    dupPartNumber == null ||
+    (state.partNumber.trim() !== "" && state.partNumber.trim().toLowerCase() !== dupPartNumber);
+  const duplicateBlocked = duplicateFrom != null && !partNumberChanged;
+
   return (
     <div className="grid gap-6 lg:grid-cols-3">
       {/* Left: core fields */}
@@ -223,13 +238,18 @@ export function ItemForm({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="partNumber">Part number</Label>
+              <Label htmlFor="partNumber">Part number{duplicateFrom ? " *" : ""}</Label>
               <Input
                 id="partNumber"
                 value={state.partNumber}
                 disabled={disabled}
                 onChange={(e) => set("partNumber", e.target.value)}
               />
+              {duplicateBlocked && (
+                <p className="text-xs text-warning">
+                  Change the part number to save this as a new item.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="sku">SKU</Label>
@@ -495,9 +515,9 @@ export function ItemForm({
         </Card>
 
         <div className="flex items-center gap-2">
-          <Button onClick={handleSave} disabled={disabled} className="flex-1">
+          <Button onClick={handleSave} disabled={disabled || duplicateBlocked} className="flex-1">
             <Save className="h-4 w-4" />
-            {saving ? "Saving…" : isNew ? "Create item" : "Save changes"}
+            {saving ? "Saving…" : duplicateFrom ? "Create duplicate" : isNew ? "Create item" : "Save changes"}
           </Button>
           {!isNew && canDelete && (
             <Button variant="destructive" onClick={handleDelete} disabled={deleting}>

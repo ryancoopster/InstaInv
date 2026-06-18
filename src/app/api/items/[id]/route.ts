@@ -53,6 +53,16 @@ export const PATCH = route(async (req: Request, { params }: Params) => {
   });
   if (!before) return fail("Item not found", 404);
 
+  // Global, case-insensitive part-number uniqueness (DB enforces it too).
+  const pn = data.partNumber?.trim();
+  if (data.partNumber !== undefined && pn) {
+    const dupe = await prisma.item.findFirst({
+      where: { partNumber: { equals: pn, mode: "insensitive" }, id: { not: params.id } },
+      select: { id: true, name: true },
+    });
+    if (dupe) return fail(`Part number "${pn}" is already used by "${dupe.name}"`, 409);
+  }
+
   const item = await prisma.item.update({
     where: { id: params.id },
     data: {
