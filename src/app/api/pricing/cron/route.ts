@@ -1,6 +1,6 @@
-import { route, ok, fail } from "@/lib/http";
+import { route, ok } from "@/lib/http";
 import { getPricingSettings, refreshMany } from "@/lib/pricing";
-import { timingSafeEqual } from "crypto";
+import { verifyCronSecret } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -15,15 +15,10 @@ export const maxDuration = 60;
 // permission-gated POST /api/pricing/refresh-all from the UI instead.
 export const GET = route(async (req: Request) => {
   const url = new URL(req.url);
-  const secret = process.env.PRICING_CRON_SECRET?.trim();
 
-  if (!secret) {
-    return fail("Cron is not configured. Set PRICING_CRON_SECRET to enable it.", 503);
-  }
-  const provided = bearer(req.headers.get("authorization")) || req.headers.get("x-cron-secret");
-  if (!provided || !safeEqual(provided, secret)) {
-    return fail("Invalid cron secret", 401);
-  }
+  // F2: shared header-secret check (see src/lib/cron-auth.ts).
+  const denied = verifyCronSecret(req, "PRICING_CRON_SECRET");
+  if (denied) return denied;
 
   const settings = await getPricingSettings();
 
@@ -34,17 +29,3 @@ export const GET = route(async (req: Request) => {
   const summary = await refreshMany({ staleHours, limit: 200, concurrency: 4 });
   return ok({ ...summary, staleHours });
 });
-
-function bearer(header: string | null): string | null {
-  if (!header) return null;
-  const m = /^Bearer\s+(.+)$/i.exec(header.trim());
-  return m ? m[1] : null;
-}
-
-// Constant-time comparison (length-guarded so timingSafeEqual never throws).
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}

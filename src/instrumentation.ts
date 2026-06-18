@@ -75,11 +75,24 @@ export async function register() {
   }
 
   // --- Approve/deny digest email scheduler -------------------------------
+
+  // SCHED-2: opt-out env mirroring PRICING_SCHEDULER_DISABLED. On serverless /
+  // multi-instance, set this and rely on the external GET /api/notifications/cron
+  // endpoint instead (avoids redundant per-instance polling/contention).
+  if (process.env.NOTIFICATIONS_SCHEDULER_DISABLED === "1") {
+    console.info(
+      "[notifications] in-process scheduler disabled via NOTIFICATIONS_SCHEDULER_DISABLED",
+    );
+    return;
+  }
+
   try {
     const { compileAndSendDue } = await import("@/lib/notifications/service");
-    // Check every minute; the per-user debounce window (Setting('notifications')
-    // .delayMinutes, default 5) gates when a digest is actually sent.
-    const NOTIF_TICK_MS = 60 * 1000;
+    // SCHED-1: tick at the debounce granularity rather than every 60s — a 1-minute
+    // tick against a default 5-minute debounce buys no responsiveness and wakes 5x
+    // per window. 2 minutes keeps latency well under the window while ~halving the
+    // idle polling.
+    const NOTIF_TICK_MS = 2 * 60 * 1000;
     let notifRunning = false;
     const notifTimer = setInterval(() => {
       void (async () => {
@@ -96,7 +109,7 @@ export async function register() {
       })();
     }, NOTIF_TICK_MS);
     if (typeof notifTimer.unref === "function") notifTimer.unref();
-    console.info("[notifications] digest scheduler started (tick every 1m; debounce honors Setting('notifications'))");
+    console.info("[notifications] digest scheduler started (tick every 2m; debounce honors Setting('notifications'))");
   } catch (err) {
     console.error("[notifications] failed to start scheduler", err);
   }
