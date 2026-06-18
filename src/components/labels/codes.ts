@@ -7,6 +7,19 @@
 
 import QRCode from "qrcode";
 
+// E-10: bound the module-level image caches so a long editing session that
+// cycles through many distinct values (live-typed bindings, resizes) can't grow
+// them without limit. Insertion-order FIFO eviction via Map ordering.
+const CACHE_MAX = 200;
+function cachePut(cache: Map<string, string>, key: string, url: string): void {
+  cache.set(key, url);
+  while (cache.size > CACHE_MAX) {
+    const oldest = cache.keys().next().value as string | undefined;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
+
 const qrCache = new Map<string, string>();
 const barcodeCache = new Map<string, string>();
 
@@ -19,7 +32,7 @@ export async function qrDataUrl(value: string, sizePx = 256): Promise<string> {
     width: sizePx,
     errorCorrectionLevel: "M",
   });
-  qrCache.set(key, url);
+  cachePut(qrCache, key, url);
   return url;
 }
 
@@ -46,6 +59,6 @@ export async function barcodeDataUrl(
     paddingheight: 0,
   });
   const url = canvas.toDataURL("image/png");
-  barcodeCache.set(key, url);
+  cachePut(barcodeCache, key, url);
   return url;
 }

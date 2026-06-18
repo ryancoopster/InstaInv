@@ -5,11 +5,17 @@
 // them requires the qrcode/bwip-js packages (used by the real PDF renderer and
 // by the live client canvas, which generates data-URL images on the fly). This
 // keeps svg.ts free of any heavy/Node-only dependency.
+//
+// Text uses the shared line-layout from layout.ts so multi-line / wrapped /
+// auto-fit / vertical-aligned text matches the editor and the printed PDF
+// (E-4). Because svg.ts has no real font metrics it measures widths with a
+// cheap average-glyph estimate, so wrapping is approximate but multi-line.
 
 import type { EntityData } from "./bindings";
 import { resolveBindingString } from "./bindings";
 import type { LabelContent, LabelElement } from "./types";
 import { mmToPx } from "./types";
+import { layoutText } from "./layout";
 
 function esc(s: string): string {
   return s
@@ -109,10 +115,34 @@ function renderElementSvg(
       const style = el.italic ? "italic" : "normal";
       const color = el.color || "#000000";
       const deco = el.underline ? ` text-decoration="underline"` : "";
-      const ls = el.letterSpacing ? ` letter-spacing="${px(el.letterSpacing / 2.83465)}"` : "";
-      // baseline roughly centred in the box
-      const ty = y + Math.min(h, fs * 1.2) * 0.5 + fs * 0.35;
-      return `<text x="${tx}" y="${ty}" font-family="${esc(fontFamily(el))}" font-size="${fs}" font-weight="${weight}" font-style="${style}" fill="${esc(color)}" text-anchor="${anchor}"${deco}${ls}${transform}>${esc(text)}</text>`;
+      const lsPx = el.letterSpacing ? px(el.letterSpacing / 2.83465) : 0;
+      const ls = lsPx ? ` letter-spacing="${lsPx}"` : "";
+      const lhMult = el.lineHeight ?? 1.18;
+
+      // E-4: wrap / auto-fit / valign via the shared layout. svg.ts lacks real
+      // font metrics, so estimate glyph width as ~0.55em (matches a typical
+      // sans-serif average) — approximate but enough for multi-line layout.
+      const measure = (s: string, size: number) => s.length * size * 0.55 + Math.max(0, s.length - 1) * lsPx;
+      const lt = layoutText(
+        text,
+        {
+          width: w,
+          height: h,
+          fontSize: fs,
+          wrap: el.wrap !== false,
+          autoFit: !!el.autoFit,
+          lineHeightMult: lhMult,
+          valign: el.valign,
+          minFontSize: 4,
+          shrinkStep: 1,
+        },
+        measure,
+      );
+      const lines = lt.lines.length ? lt.lines : [""];
+      const tspans = lines
+        .map((ln, i) => `<tspan x="${tx}" y="${y + lt.top + lt.fontSize * 0.82 + i * lt.lineHeight}">${esc(ln || " ")}</tspan>`)
+        .join("");
+      return `<text font-family="${esc(fontFamily(el))}" font-size="${lt.fontSize}" font-weight="${weight}" font-style="${style}" fill="${esc(color)}" text-anchor="${anchor}"${deco}${ls}${transform}>${tspans}</text>`;
     }
   }
 }

@@ -20,11 +20,16 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { toast } from "@/components/ui/toast";
 import { BindingTokenPicker } from "./BindingTokenPicker";
+import { LINEAR_SYMBOLOGIES, isMatrixSymbology } from "@/lib/labels/types";
 import type { LabelElement } from "@/lib/labels/types";
 import type { LabelTargetKind } from "@/lib/labels/types";
 
 const FONT_FAMILIES = ["Helvetica, Arial, sans-serif", "Georgia, 'Times New Roman', serif", "'Courier New', monospace"];
-const SYMBOLOGIES = ["code128", "code39", "ean13", "upca", "qrcode", "datamatrix", "pdf417"];
+// E-5: the barcode element only offers 1D linear symbologies. 2D matrix codes
+// (qrcode/datamatrix/pdf417) belong on the QR element, which enforces a square
+// box; offering them here let users stretch a matrix code into an unscannable
+// non-square barcode box.
+const SYMBOLOGIES = [...LINEAR_SYMBOLOGIES];
 
 function NumField({
   label,
@@ -241,7 +246,18 @@ export function PropertyPanel({
                     {s}
                   </option>
                 ))}
+                {/* E-5: keep a legacy 2D value selectable so existing templates
+                    still show their setting, but steer new designs to the QR
+                    element where matrix codes stay square. */}
+                {isMatrixSymbology(el.symbology) && (
+                  <option value={el.symbology}>{el.symbology} (2D)</option>
+                )}
               </Select>
+              {isMatrixSymbology(el.symbology) && (
+                <p className="text-xs text-muted-foreground">
+                  2D matrix codes render square. Use a QR element for new {el.symbology} codes.
+                </p>
+              )}
             </div>
           )}
         </section>

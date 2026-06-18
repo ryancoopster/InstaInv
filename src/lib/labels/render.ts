@@ -8,7 +8,29 @@ import bwipjs from "bwip-js/node";
 import { PDFDocument, StandardFonts, rgb, degrees, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 import type { EntityData } from "./bindings";
 import { resolveBindingString } from "./bindings";
-import { mmToPt, normalizeContent, type LabelContent, type LabelElement } from "./types";
+import { mmToPt, normalizeContent, isMatrixSymbology, type LabelContent, type LabelElement } from "./types";
+import { layoutText, UNDERLINE_OFFSET_RATIO, UNDERLINE_THICKNESS_RATIO } from "./layout";
+
+// E-1: pdf-lib's rotate option pivots about the draw anchor (bottom-left corner
+// for rect/image, the per-line baseline-left for text), but the canvas + SVG
+// preview pivot about the element CENTER. Pre-rotating the anchor about the
+// center by the same angle turns the corner-pivot into a center-pivot so the
+// printed output matches WYSIWYG. (a is the PDF angle in radians = -rotation.)
+function rotateAbout(
+  ax: number,
+  ay: number,
+  cx: number,
+  cy: number,
+  rotationDeg: number,
+): { x: number; y: number } {
+  if (!rotationDeg) return { x: ax, y: ay };
+  const a = (-rotationDeg * Math.PI) / 180; // matches degrees(-el.rotation)
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const dx = ax - cx;
+  const dy = ay - cy;
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
 
 // Server-side label renderer: template content + resolved entity -> PDF Buffer,
 // drawn at the exact tape size (mm -> points). Re-exports the binding helper so
@@ -145,71 +167,88 @@ function drawWrappedText(
   const align = el.align || "left";
   const wrap = el.wrap !== false;
   const lhMult = el.lineHeight ?? 1.18;
+  // E-12: tracking is authored in pt; honour it in the PDF the same way the
+  // canvas/SVG do (today it was silently dropped from the print output).
+  const letterSpacingPt = el.letterSpacing ?? 0;
 
-  function layout(sizePt: number): string[] {
-    const paragraphs = value.split(/\r?\n/);
-    if (!wrap) return paragraphs;
-    const out: string[] = [];
-    for (const para of paragraphs) {
-      const words = para.split(/\s+/).filter(Boolean);
-      if (words.length === 0) {
-        out.push("");
-        continue;
-      }
-      let line = "";
-      for (const word of words) {
-        const trial = line ? `${line} ${word}` : word;
-        if (safeWidth(font, trial, sizePt) > wPt && line) {
-          out.push(line);
-          line = word;
-        } else {
-          line = trial;
-        }
-      }
-      if (line) out.push(line);
-    }
-    return out;
-  }
+  // E-4: share wrap / auto-fit / valign with the canvas + SVG via layout.ts.
+  // safeWidth measures plain glyph runs; layoutText adds the tracking gaps.
+  const lt = layoutText(
+    value,
+    {
+      width: wPt,
+      height: hPt,
+      fontSize: el.fontSize ?? 10,
+      wrap,
+      autoFit: !!el.autoFit,
+      lineHeightMult: lhMult,
+      valign: el.valign,
+      letterSpacing: letterSpacingPt,
+    },
+    (text, size) => safeWidth(font, text, size),
+  );
+  const sizePt = lt.fontSize;
+  const lines = lt.lines;
+  const lineHeight = lt.lineHeight;
 
-  let sizePt = el.fontSize ?? 10;
-  let lines = layout(sizePt);
-  if (el.autoFit) {
-    while (sizePt > 3) {
-      lines = layout(sizePt);
-      const totalH = lines.length * sizePt * lhMult;
-      const widest = Math.max(0, ...lines.map((l) => safeWidth(font, l, sizePt)));
-      if (totalH <= hPt && (wrap || widest <= wPt)) break;
-      sizePt -= 0.5;
-    }
-  }
+  // Block center in PDF (bottom-left origin) coordinates, for the rotation pivot.
+  const cx = xPt + wPt / 2;
+  const cy = pageHeightPt - (yTopPt + hPt / 2);
 
-  const lineHeight = sizePt * lhMult;
-  const totalH = lines.length * lineHeight;
-  let top = yTopPt;
-  if (el.valign === "middle") top = yTopPt + (hPt - totalH) / 2;
-  else if (el.valign === "bottom") top = yTopPt + (hPt - totalH);
+  // Width of a line including inter-glyph tracking, for alignment + underline.
+  const trackedWidth = (line: string) =>
+    safeWidth(font, line, sizePt) + Math.max(0, line.length - 1) * letterSpacingPt;
 
-  let cursorTop = top;
+  let cursorTop = yTopPt + lt.top;
   for (const line of lines) {
     const baseline = cursorTop + sizePt;
-    const lineWidth = safeWidth(font, line, sizePt);
+    const lineWidth = trackedWidth(line);
     let drawX = xPt;
     if (align === "center") drawX = xPt + (wPt - lineWidth) / 2;
     else if (align === "right") drawX = xPt + (wPt - lineWidth);
-    page.drawText(line, {
-      x: drawX,
-      y: pageHeightPt - baseline,
-      size: sizePt,
-      font,
-      color,
-      rotate: el.rotation ? degrees(-el.rotation) : undefined,
-    });
+    const drawY = pageHeightPt - baseline;
+    // E-1: rotate this line's baseline-left anchor about the block center so the
+    // whole multi-line block rotates as a unit (pdf-lib otherwise pivots each
+    // line about its own baseline-left).
+    const anchor = rotateAbout(drawX, drawY, cx, cy, el.rotation ?? 0);
+
+    if (letterSpacingPt) {
+      // pdf-lib's drawText has no character-spacing option, so place glyphs one
+      // at a time, advancing the (unrotated) x by glyph width + tracking, then
+      // rotate each glyph anchor about the block center.
+      let glyphX = drawX;
+      for (const ch of line) {
+        const gAnchor = rotateAbout(glyphX, drawY, cx, cy, el.rotation ?? 0);
+        page.drawText(ch, {
+          x: gAnchor.x,
+          y: gAnchor.y,
+          size: sizePt,
+          font,
+          color,
+          rotate: el.rotation ? degrees(-el.rotation) : undefined,
+        });
+        glyphX += safeWidth(font, ch, sizePt) + letterSpacingPt;
+      }
+    } else {
+      page.drawText(line, {
+        x: anchor.x,
+        y: anchor.y,
+        size: sizePt,
+        font,
+        color,
+        rotate: el.rotation ? degrees(-el.rotation) : undefined,
+      });
+    }
+
     if (el.underline && line) {
-      const uy = pageHeightPt - (baseline + sizePt * 0.12);
+      // E-12: underline geometry from shared ratios so it matches the preview.
+      const uyTop = drawY - sizePt * UNDERLINE_OFFSET_RATIO;
+      const uStart = rotateAbout(drawX, uyTop, cx, cy, el.rotation ?? 0);
+      const uEnd = rotateAbout(drawX + lineWidth, uyTop, cx, cy, el.rotation ?? 0);
       page.drawLine({
-        start: { x: drawX, y: uy },
-        end: { x: drawX + lineWidth, y: uy },
-        thickness: Math.max(0.5, sizePt * 0.06),
+        start: { x: uStart.x, y: uStart.y },
+        end: { x: uEnd.x, y: uEnd.y },
+        thickness: Math.max(0.5, sizePt * UNDERLINE_THICKNESS_RATIO),
         color,
       });
     }
@@ -272,12 +311,18 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
     const wPt = mmToPt(el.w);
     const hPt = mmToPt(el.h);
     const yBottom = heightPt - (yTopPt + hPt); // pdf-lib y of the box's bottom edge
+    // E-1: element center in PDF coords — the pivot the canvas/SVG rotate about.
+    const cxPt = xPt + wPt / 2;
+    const cyPt = heightPt - (yTopPt + hPt / 2);
 
     switch (el.type) {
       case "rect": {
+        // E-1: pdf-lib pivots a rectangle about its bottom-left anchor; pre-rotate
+        // that anchor about the center so it matches the center-pivot preview.
+        const a = rotateAbout(xPt, yBottom, cxPt, cyPt, el.rotation ?? 0);
         page.drawRectangle({
-          x: xPt,
-          y: yBottom,
+          x: a.x,
+          y: a.y,
           width: wPt,
           height: hPt,
           color: el.fill && el.fill !== "none" ? hexToRgb(el.fill) : undefined,
@@ -326,9 +371,12 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
         const side = Math.min(wPt, hPt);
         const png = await qrPng(value, side * 4);
         const img = await pdf.embedPng(png);
+        // E-1: rotate the square's bottom-left anchor about the element center.
+        const qrBottom = heightPt - (yTopPt + side);
+        const a = rotateAbout(xPt, qrBottom, cxPt, cyPt, el.rotation ?? 0);
         page.drawImage(img, {
-          x: xPt,
-          y: heightPt - (yTopPt + side),
+          x: a.x,
+          y: a.y,
           width: side,
           height: side,
           rotate: el.rotation ? degrees(-el.rotation) : undefined,
@@ -337,19 +385,28 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
       }
       case "barcode": {
         const value = entity ? resolveBindingString(`{{${el.binding || ""}}}`, entity) : el.binding || "";
+        // E-5: 2D matrix codes must stay square; only 1D linear codes fill the
+        // full (possibly wide) box. Otherwise a stretched matrix may not scan.
+        const matrix = isMatrixSymbology(el.symbology);
+        const bw = matrix ? Math.min(wPt, hPt) : wPt;
+        const bh = matrix ? Math.min(wPt, hPt) : hPt;
+        const drawBottom = matrix ? heightPt - (yTopPt + bh) : yBottom;
         try {
-          const png = await barcodePng(value, el.symbology || "code128", wPt, hPt);
+          const png = await barcodePng(value, el.symbology || "code128", bw, bh);
           const img = await pdf.embedPng(png);
+          // E-1: pre-rotate the bottom-left anchor about the element center.
+          const a = rotateAbout(xPt, drawBottom, cxPt, cyPt, el.rotation ?? 0);
           page.drawImage(img, {
-            x: xPt,
-            y: yBottom,
-            width: wPt,
-            height: hPt,
+            x: a.x,
+            y: a.y,
+            width: bw,
+            height: bh,
             rotate: el.rotation ? degrees(-el.rotation) : undefined,
           });
         } catch {
           // Unencodable value — draw a thin box so the slot is visible.
-          page.drawRectangle({ x: xPt, y: yBottom, width: wPt, height: hPt, borderColor: hexToRgb("#000000"), borderWidth: 0.5 });
+          const a = rotateAbout(xPt, drawBottom, cxPt, cyPt, el.rotation ?? 0);
+          page.drawRectangle({ x: a.x, y: a.y, width: bw, height: bh, borderColor: hexToRgb("#000000"), borderWidth: 0.5, rotate: el.rotation ? degrees(-el.rotation) : undefined });
         }
         break;
       }
@@ -359,9 +416,11 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
         if (!bytes) break;
         const img = await embedImageAuto(pdf, bytes, el.src);
         if (!img) break;
+        // E-1: pre-rotate the bottom-left anchor about the element center.
+        const a = rotateAbout(xPt, yBottom, cxPt, cyPt, el.rotation ?? 0);
         page.drawImage(img, {
-          x: xPt,
-          y: yBottom,
+          x: a.x,
+          y: a.y,
           width: wPt,
           height: hPt,
           rotate: el.rotation ? degrees(-el.rotation) : undefined,

@@ -199,6 +199,25 @@ export function tapePresetById(id: string): TapePreset | undefined {
 }
 
 // ---------------------------------------------------------------------------
+// Symbology classification (E-5).
+// ---------------------------------------------------------------------------
+
+/** 1D linear symbologies offered on the `barcode` element. */
+export const LINEAR_SYMBOLOGIES = ["code128", "code39", "ean13", "upca", "itf"] as const;
+
+/** 2D matrix symbologies. These must be drawn in a SQUARE box (like the qrcode
+ *  element) — stretching them non-uniformly into a wide barcode box can make
+ *  them unscannable. New designs route these through the qrcode element; this
+ *  set lets the renderers keep existing data square as a fallback. */
+export const MATRIX_SYMBOLOGIES = ["qrcode", "datamatrix", "pdf417", "azteccode"] as const;
+
+/** True when a symbology is a 2D matrix code that needs square geometry. */
+export function isMatrixSymbology(symbology: string | undefined | null): boolean {
+  if (!symbology) return false;
+  return (MATRIX_SYMBOLOGIES as readonly string[]).includes(symbology.toLowerCase());
+}
+
+// ---------------------------------------------------------------------------
 // Unit conversion helpers (shared by canvas + render).
 // ---------------------------------------------------------------------------
 

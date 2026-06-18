@@ -3,7 +3,8 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 import { resolveBindingString, type EntityData } from "@/lib/labels/bindings";
-import { mmToPx, type LabelElement } from "@/lib/labels/types";
+import { mmToPx, isMatrixSymbology, type LabelElement } from "@/lib/labels/types";
+import { layoutText } from "@/lib/labels/layout";
 import { qrDataUrl, barcodeDataUrl } from "./codes";
 
 // Interactive SVG canvas. Renders the tape at scale (mm -> px), supports
@@ -133,6 +134,15 @@ export function LabelCanvas({
   React.useEffect(() => {
     elementsRef.current = elements;
   }, [elements]);
+  // Latest parent callbacks behind refs so the memoised children's drag handler
+  // (beginDrag) stays referentially stable even when the parent re-creates these
+  // callbacks each render (E-6).
+  const onSelectRef = React.useRef(onSelect);
+  const onBeginEditRef = React.useRef(onBeginEdit);
+  React.useEffect(() => {
+    onSelectRef.current = onSelect;
+    onBeginEditRef.current = onBeginEdit;
+  });
   const [guides, setGuides] = React.useState<{ vx: number[]; hy: number[] }>({ vx: [], hy: [] });
 
   const Wpx = widthMm * zoom;
@@ -152,15 +162,22 @@ export function LabelCanvas({
     return { x, y };
   }
 
-  function beginDrag(e: React.PointerEvent, el: LabelElement, mode: "move" | "resize" | "rotate", handle?: HandleId) {
-    e.stopPropagation();
-    e.preventDefault();
-    (e.target as Element).setPointerCapture?.(e.pointerId);
-    const { x, y } = pointerMm(e);
-    dragRef.current = { mode, handle, startX: x, startY: y, orig: { ...el } };
-    onSelect(el.id);
-    onBeginEdit?.();
-  }
+  // E-6: stable across renders (only re-created on zoom change) so the memoised
+  // ElementShape children aren't invalidated every drag frame by fresh handlers.
+  const beginDrag = React.useCallback(
+    (e: React.PointerEvent, el: LabelElement, mode: "move" | "resize" | "rotate", handle?: HandleId) => {
+      e.stopPropagation();
+      e.preventDefault();
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      const { x, y } = pointerMm(e);
+      dragRef.current = { mode, handle, startX: x, startY: y, orig: { ...el } };
+      onSelectRef.current(el.id);
+      onBeginEditRef.current?.();
+    },
+    // pointerMm reads svgRef + zoom; only zoom changes the math.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [zoom],
+  );
 
   React.useEffect(() => {
     function onMove(e: PointerEvent) {
@@ -209,20 +226,73 @@ export function LabelCanvas({
       }
 
       // resize
-      let { x: nx, y: ny, w: nw, h: nh } = o;
       const h = drag.handle!;
-      if (h.includes("e")) nw = snapMm(o.w + dx);
-      if (h.includes("s")) nh = snapMm(o.h + dy);
+      // E-2: the handles live inside the rotated group, so the visual east handle
+      // is not along the screen x-axis once the element is rotated. Transform the
+      // raw screen delta into the element's local (unrotated) frame before driving
+      // w/h, then map the resulting top-left shift back to world coords so the
+      // opposite edge/corner stays visually pinned (rotation pivots about center).
+      const rot = o.rotation || 0;
+      const rad = (rot * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      // world delta -> local delta: rotate by -rotation.
+      const dlx = dx * cos + dy * sin;
+      const dly = -dx * sin + dy * cos;
+
+      // Work in the element's local frame (top-left at 0,0, size o.w x o.h).
+      let lx = 0;
+      let ly = 0;
+      let nw = o.w;
+      let nh = o.h;
+      if (h.includes("e")) nw = snapMm(o.w + dlx);
+      if (h.includes("s")) nh = snapMm(o.h + dly);
       if (h.includes("w")) {
-        nx = snapMm(o.x + dx);
-        nw = o.w + (o.x - nx);
+        lx = snapMm(dlx);
+        nw = o.w - lx;
       }
       if (h.includes("n")) {
-        ny = snapMm(o.y + dy);
-        nh = o.h + (o.y - ny);
+        ly = snapMm(dly);
+        nh = o.h - ly;
       }
+      // Floor to min size, then re-anchor the moving edge from the FIXED opposite
+      // edge so W/N resizes don't slide past where they should stop (E-8).
       nw = Math.max(2, nw);
       nh = Math.max(2, nh);
+      if (h.includes("w")) lx = o.w - nw; // pin the east (right) edge
+      if (h.includes("n")) ly = o.h - nh; // pin the south (bottom) edge
+
+      if (rot) {
+        // Map the local top-left shift (lx,ly) back to world coords. The element
+        // rotates about its center; keep the original center fixed for the pinned
+        // edges by rotating the local top-left position about the (unchanged)
+        // original center, then deriving the new top-left from the new center.
+        const oCx = o.x + o.w / 2;
+        const oCy = o.y + o.h / 2;
+        // New top-left in local space relative to the original top-left.
+        // Local center of the *new* box, expressed relative to the original
+        // top-left, is (lx + nw/2, ly + nh/2); the original center sits at
+        // (o.w/2, o.h/2). The delta between them, rotated into world space, moves
+        // the center.
+        const dcx = lx + nw / 2 - o.w / 2;
+        const dcy = ly + nh / 2 - o.h / 2;
+        const wdcx = dcx * cos - dcy * sin;
+        const wdcy = dcx * sin + dcy * cos;
+        const newCx = oCx + wdcx;
+        const newCy = oCy + wdcy;
+        let nx = newCx - nw / 2;
+        let ny = newCy - nh / 2;
+        // For rotated elements the AABB clamp below would distort geometry, so
+        // only round and skip the axis-aligned bounds clamps.
+        nx = Math.round(nx * 100) / 100;
+        ny = Math.round(ny * 100) / 100;
+        onChange(o.id, { x: nx, y: ny, w: nw, h: nh });
+        return;
+      }
+
+      // Axis-aligned (rotation 0): apply the local shift directly to world x/y.
+      let nx = o.x + lx;
+      let ny = o.y + ly;
       nx = clamp(nx, 0, widthMm - 2);
       ny = clamp(ny, 0, heightMm - 2);
       if (nx + nw > widthMm) nw = widthMm - nx;
@@ -279,9 +349,7 @@ export function LabelCanvas({
             preview={preview}
             codeImage={codeImages[el.id]}
             selected={el.id === selectedId}
-            onPointerDownMove={(e) => beginDrag(e, el, "move")}
-            onPointerDownResize={(e, handle) => beginDrag(e, el, "resize", handle)}
-            onPointerDownRotate={(e) => beginDrag(e, el, "rotate")}
+            beginDrag={beginDrag}
           />
         );
       })}
@@ -301,16 +369,16 @@ function clamp(n: number, min: number, max: number) {
   return Math.min(Math.max(n, min), max);
 }
 
-function ElementShape({
+// E-6: memoised so siblings whose `el` reference is unchanged by patchLive's
+// elements.map skip re-render during a drag — only the dragged element updates.
+const ElementShape = React.memo(function ElementShape({
   el,
   zoom,
   entity,
   preview,
   codeImage,
   selected,
-  onPointerDownMove,
-  onPointerDownResize,
-  onPointerDownRotate,
+  beginDrag,
 }: {
   el: LabelElement;
   zoom: number;
@@ -318,10 +386,13 @@ function ElementShape({
   preview: boolean;
   codeImage?: string;
   selected: boolean;
-  onPointerDownMove: (e: React.PointerEvent) => void;
-  onPointerDownResize: (e: React.PointerEvent, handle: HandleId) => void;
-  onPointerDownRotate: (e: React.PointerEvent) => void;
+  beginDrag: (e: React.PointerEvent, el: LabelElement, mode: "move" | "resize" | "rotate", handle?: HandleId) => void;
 }) {
+  // Handlers built from the stable beginDrag + this element; recreated each
+  // render but not compared by React.memo (only the props above are).
+  const onPointerDownMove = (e: React.PointerEvent) => beginDrag(e, el, "move");
+  const onPointerDownResize = (e: React.PointerEvent, handle: HandleId) => beginDrag(e, el, "resize", handle);
+  const onPointerDownRotate = (e: React.PointerEvent) => beginDrag(e, el, "rotate");
   const x = el.x * zoom;
   const y = el.y * zoom;
   const w = el.w * zoom;
@@ -329,6 +400,36 @@ function ElementShape({
   const cx = x + w / 2;
   const cy = y + h / 2;
   const transform = el.rotation ? `rotate(${el.rotation} ${cx} ${cy})` : undefined;
+
+  // E-6: memoise the text line-layout so the measureText-based wrapping / auto-fit
+  // only recomputes when a relevant input changes — not on every drag frame where
+  // only x/y move (which leave wrapping unchanged). Keyed on the text value, box
+  // size in px, font + style, wrap/auto-fit/lineHeight/valign and zoom.
+  const resolvedText = el.type === "text" ? (preview && entity ? resolveBindingString(el.text || "", entity) : el.text || "") : "";
+  const family = el.fontFamily || "Helvetica, Arial, sans-serif";
+  const startFontPx = ((el.fontSize ?? 10) / 72) * 25.4 * zoom; // pt -> mm -> px
+  const lsPx = ((el.letterSpacing ?? 0) / 72) * 25.4 * zoom;
+  const textLayout = React.useMemo(
+    () =>
+      layoutText(
+        resolvedText,
+        {
+          width: w,
+          height: h,
+          fontSize: startFontPx,
+          wrap: el.wrap !== false,
+          autoFit: !!el.autoFit,
+          lineHeightMult: el.lineHeight ?? 1.18,
+          valign: el.valign,
+          minFontSize: 4,
+          shrinkStep: 1,
+          letterSpacing: lsPx,
+        },
+        (text, size) => measureText(text, size, family, !!el.bold, !!el.italic),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [resolvedText, w, h, startFontPx, lsPx, family, el.bold, el.italic, el.wrap, el.autoFit, el.lineHeight, el.valign],
+  );
 
   let body: React.ReactNode = null;
   switch (el.type) {
@@ -361,85 +462,53 @@ function ElementShape({
         <Placeholder x={x} y={y} w={w} h={h} label="Image" />
       );
       break;
-    case "qrcode":
+    case "qrcode": {
+      // E-10: draw the placeholder square (Math.min(w,h)) so the footprint
+      // matches the resolved QR image and doesn't shift when it loads.
+      const qrSide = Math.min(w, h);
       body = codeImage ? (
-        <image x={x} y={y} width={Math.min(w, h)} height={Math.min(w, h)} href={codeImage} />
+        <image x={x} y={y} width={qrSide} height={qrSide} href={codeImage} />
       ) : (
-        <Placeholder x={x} y={y} w={w} h={h} label="QR" />
+        <Placeholder x={x} y={y} w={qrSide} h={qrSide} label="QR" />
       );
       break;
-    case "barcode":
+    }
+    case "barcode": {
+      // E-5: render a 2D matrix symbology square (like the QR element) so the
+      // preview matches the PDF and the code isn't stretched out of scannability;
+      // 1D linear codes still fill the full box.
+      const matrix = isMatrixSymbology(el.symbology);
+      const bw = matrix ? Math.min(w, h) : w;
+      const bh = matrix ? Math.min(w, h) : h;
       body = codeImage ? (
-        <image x={x} y={y} width={w} height={h} href={codeImage} preserveAspectRatio="none" />
+        <image x={x} y={y} width={bw} height={bh} href={codeImage} preserveAspectRatio={matrix ? "xMidYMid meet" : "none"} />
       ) : (
-        <Placeholder x={x} y={y} w={w} h={h} label="Barcode" />
+        <Placeholder x={x} y={y} w={bw} h={bh} label="Barcode" />
       );
       break;
+    }
     case "text":
     default: {
-      const raw = el.text || "";
-      const value = preview && entity ? resolveBindingString(raw, entity) : raw;
-      const family = el.fontFamily || "Helvetica, Arial, sans-serif";
-      const bold = !!el.bold;
-      const italic = !!el.italic;
-      const wrap = el.wrap !== false;
-      const lhMult = el.lineHeight ?? 1.18;
-      const layout = (fp: number): string[] => {
-        const paras = value.split(/\r?\n/);
-        if (!wrap) return paras;
-        const out: string[] = [];
-        for (const para of paras) {
-          const words = para.split(/\s+/).filter(Boolean);
-          if (!words.length) {
-            out.push("");
-            continue;
-          }
-          let line = "";
-          for (const word of words) {
-            const trial = line ? `${line} ${word}` : word;
-            if (measureText(trial, fp, family, bold, italic) > w && line) {
-              out.push(line);
-              line = word;
-            } else line = trial;
-          }
-          if (line) out.push(line);
-        }
-        return out;
-      };
-      let fontPx = ((el.fontSize ?? 10) / 72) * 25.4 * zoom; // pt -> mm -> px
-      let lines = layout(fontPx);
-      if (el.autoFit) {
-        while (fontPx > 4) {
-          lines = layout(fontPx);
-          const totalH = lines.length * fontPx * lhMult;
-          const widest = Math.max(0, ...lines.map((l) => measureText(l, fontPx, family, bold, italic)));
-          if (totalH <= h && (wrap || widest <= w)) break;
-          fontPx -= 1;
-        }
-      }
-      const lineH = fontPx * lhMult;
-      const totalTextH = lines.length * lineH;
-      let top = y;
-      if (el.valign === "middle") top = y + (h - totalTextH) / 2;
-      else if (el.valign === "bottom") top = y + (h - totalTextH);
+      // E-4 + E-6: layout comes from the shared, memoised helper above.
+      const lt = textLayout;
       const align = el.align || "left";
       const anchor = align === "center" ? "middle" : align === "right" ? "end" : "start";
       const tx = align === "center" ? cx : align === "right" ? x + w : x;
-      const lsPx = ((el.letterSpacing ?? 0) / 72) * 25.4 * zoom;
+      const lines = lt.lines.length ? lt.lines : [" "];
       body = (
         <text
-          fontSize={fontPx}
+          fontSize={lt.fontSize}
           fontFamily={family}
-          fontWeight={bold ? "bold" : "normal"}
-          fontStyle={italic ? "italic" : "normal"}
+          fontWeight={el.bold ? "bold" : "normal"}
+          fontStyle={el.italic ? "italic" : "normal"}
           fill={el.color || "#000000"}
           textAnchor={anchor}
           textDecoration={el.underline ? "underline" : undefined}
           letterSpacing={lsPx ? lsPx : undefined}
           style={{ userSelect: "none" }}
         >
-          {(lines.length ? lines : [" "]).map((ln, i) => (
-            <tspan key={i} x={tx} y={top + fontPx * 0.82 + i * lineH}>
+          {lines.map((ln, i) => (
+            <tspan key={i} x={tx} y={y + lt.top + lt.fontSize * 0.82 + i * lt.lineHeight}>
               {ln || " "}
             </tspan>
           ))}
@@ -513,7 +582,7 @@ function ElementShape({
       )}
     </g>
   );
-}
+});
 
 function Placeholder({ x, y, w, h, label }: { x: number; y: number; w: number; h: number; label: string }) {
   return (

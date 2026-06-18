@@ -143,12 +143,24 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
     }
   }
 
+  // Always-current snapshot of content, read by event handlers and by the
+  // history helpers so they can capture state without a side effect inside a
+  // setState updater (E-3) and without stale closures (E-11).
+  const contentRef = React.useRef(content);
+  React.useEffect(() => {
+    contentRef.current = content;
+  }, [content]);
+
   // ---- undo/redo history ----
   const pastRef = React.useRef<LabelContent[]>([]);
   const futureRef = React.useRef<LabelContent[]>([]);
   const sessionRef = React.useRef(false);
   const clipboardRef = React.useRef<LabelElement | null>(null);
-  const [, forceTick] = React.useReducer((x) => x + 1, 0);
+  // E-7: real state for the undo/redo enabled flags (replaces reading refs in
+  // render + a manual forceTick). hist mirrors the past/future stack depths and
+  // is updated in one place (syncHist) wherever those stacks change.
+  const [hist, setHist] = React.useState({ past: 0, future: 0 });
+  const syncHist = () => setHist({ past: pastRef.current.length, future: futureRef.current.length });
 
   const markDirty = () => setDirty(true);
   const cloneContent = (c: LabelContent): LabelContent => JSON.parse(JSON.stringify(c));
@@ -158,26 +170,23 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
     futureRef.current = [];
   }
 
-  // Atomic, undoable mutation (snapshots the pre-state inside the updater).
+  // Atomic, undoable mutation. E-3: snapshot the pre-state from contentRef
+  // OUTSIDE the setState updater so the updater stays pure (no ref mutation /
+  // side effects inside it).
   function apply(fn: (c: LabelContent) => LabelContent) {
-    setContent((c) => {
-      pushPast(c);
-      return fn(c);
-    });
+    pushPast(contentRef.current);
+    setContent((c) => fn(c));
     markDirty();
     sessionRef.current = false;
-    forceTick();
+    syncHist();
   }
 
   // For continuous edits (drag / typing): snapshot once at the start of a session.
   function beginEditSession() {
     if (sessionRef.current) return;
     sessionRef.current = true;
-    setContent((c) => {
-      pushPast(c);
-      return c;
-    });
-    forceTick();
+    pushPast(contentRef.current); // E-3: snapshot outside any updater.
+    syncHist();
   }
   function endEditSession() {
     sessionRef.current = false;
@@ -188,24 +197,23 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
   }
 
   function undo() {
-    setContent((cur) => {
-      if (pastRef.current.length === 0) return cur;
-      futureRef.current.push(cloneContent(cur));
-      return pastRef.current.pop()!;
-    });
+    if (pastRef.current.length === 0) return;
+    // E-3: mutate the history stacks here, not inside the updater.
+    futureRef.current.push(cloneContent(contentRef.current));
+    const prev = pastRef.current.pop()!;
+    setContent(prev);
     markDirty();
     sessionRef.current = false;
-    forceTick();
+    syncHist();
   }
   function redo() {
-    setContent((cur) => {
-      if (futureRef.current.length === 0) return cur;
-      pastRef.current.push(cloneContent(cur));
-      return futureRef.current.pop()!;
-    });
+    if (futureRef.current.length === 0) return;
+    pastRef.current.push(cloneContent(contentRef.current));
+    const next = futureRef.current.pop()!;
+    setContent(next);
     markDirty();
     sessionRef.current = false;
-    forceTick();
+    syncHist();
   }
 
   // ---- element mutation helpers ----
@@ -301,7 +309,7 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
       if (!selectedId) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) return;
-      const el = content.elements.find((x) => x.id === selectedId);
+      const el = contentRef.current.elements.find((x) => x.id === selectedId);
       if (!el) return;
 
       if (e.key === "Delete" || e.key === "Backspace") {
@@ -319,15 +327,21 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
       else return;
       e.preventDefault();
       beginEditSession();
+      // E-11: clamp the upper bound to Math.max(0, ...) so an element wider/taller
+      // than the tape (negative dim-el.w) doesn't get forced to a negative
+      // coordinate — matching placedCopy's guard at lines above.
       patchLive(selectedId, {
-        x: clamp(Math.round((el.x + dx) * 100) / 100, 0, widthMm - el.w),
-        y: clamp(Math.round((el.y + dy) * 100) / 100, 0, heightMm - el.h),
+        x: clamp(Math.round((el.x + dx) * 100) / 100, 0, Math.max(0, widthMm - el.w)),
+        y: clamp(Math.round((el.y + dy) * 100) / 100, 0, Math.max(0, heightMm - el.h)),
       });
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+    // E-11: read the latest elements via a ref so the listener binds once per
+    // selection/dimension change instead of re-binding every drag frame (when
+    // content.elements gets a fresh reference from patchLive).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId, content.elements, gridMm, widthMm, heightMm]);
+  }, [selectedId, gridMm, widthMm, heightMm]);
 
   // End any open edit session when the selection changes.
   React.useEffect(() => {
@@ -455,7 +469,7 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
           size="icon"
           className="h-8 w-8"
           onClick={undo}
-          disabled={pastRef.current.length === 0}
+          disabled={hist.past === 0}
           aria-label="Undo"
           title="Undo (⌘/Ctrl+Z)"
         >
@@ -466,7 +480,7 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
           size="icon"
           className="h-8 w-8"
           onClick={redo}
-          disabled={futureRef.current.length === 0}
+          disabled={hist.future === 0}
           aria-label="Redo"
           title="Redo (⇧⌘/Ctrl+Z)"
         >

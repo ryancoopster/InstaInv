@@ -142,6 +142,8 @@ export function bindingPalette(target: LabelTargetKind, customKeys: string[] = [
     { token: "{{item.barcode}}", label: "Barcode value" },
     { token: "{{item.description}}", label: "Description" },
     { token: "{{item.quantity}}", label: "Quantity on hand" },
+    { token: "{{item.minQuantity}}", label: "Min quantity" }, // E-9
+    { token: "{{item.desiredQuantity}}", label: "Desired quantity" }, // E-9
     { token: "{{item.unit}}", label: "Unit" },
     { token: "{{item.url}}", label: "Public item URL" },
     { token: "{{item.category.name}}", label: "Category" },
@@ -159,6 +161,7 @@ export function bindingPalette(target: LabelTargetKind, customKeys: string[] = [
   const boxTokens: BindingToken[] = [
     { token: "{{box.name}}", label: "Box name" },
     { token: "{{box.location}}", label: "Box location" },
+    { token: "{{box.description}}", label: "Box description" }, // E-9
     { token: "{{box.summary}}", label: "Box summary" },
   ];
   const binTokens: BindingToken[] = [{ token: "{{bin.name}}", label: "Bin name" }];
@@ -217,7 +220,7 @@ export function sampleEntity(target: LabelTargetKind): EntityData {
       },
     },
     drawer: { id: "sample", name: "Nuts & Washers", label: "A2", summary: "12 items (340 pieces) — Hardware, Fasteners." },
-    box: { id: "sample", name: "Hardware Case A", location: "Shop wall", summary: "48 items across 4 drawers." },
+    box: { id: "sample", name: "Hardware Case A", location: "Shop wall", description: "Fasteners & small hardware.", summary: "48 items across 4 drawers." },
     bin: { id: "sample", name: "Nuts" },
   };
 }
