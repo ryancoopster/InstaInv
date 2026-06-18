@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Loader2, LogOut, Minus, Package, Plus } from "lucide-react";
+import { Loader2, MoreVertical, Minus, Package, Plus, FolderOutput, PackageX, FolderInput } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { applySort, cn, formatNumber } from "@/lib/utils";
 import {
@@ -16,7 +16,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/ui/toast";
+import { AssignToBoxDialog } from "./AssignToBoxDialog";
 import type { BinDetail, DrawerItem } from "./types";
 
 interface DrawerItemsListProps {
@@ -50,6 +58,7 @@ export function DrawerItemsList({
 }: DrawerItemsListProps) {
   const [sortKey, setSortKey] = React.useState<SortKey>("manual");
   const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [assignItem, setAssignItem] = React.useState<DrawerItem | null>(null);
 
   const view =
     sortKey === "manual"
@@ -87,16 +96,34 @@ export function DrawerItemsList({
     }
   }
 
-  async function moveOut(item: DrawerItem) {
+  async function unassignFromDrawer(item: DrawerItem) {
     setBusyId(item.id);
     try {
-      // Detach from this drawer (and any bin) — null drawer/bin.
+      // Clear drawer + bin but keep the item in its box.
       await api.post("/api/items/move", { itemId: item.id, drawerId: null, binId: null });
       onMovedOut(item.id);
-      toast.success(`${item.name} moved out of the drawer`);
+      toast.success(`${item.name} removed from the drawer (still in the box)`);
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Move failed";
-      toast.error({ title: "Could not move out", description: message });
+      toast.error({
+        title: "Could not unassign",
+        description: err instanceof ApiError ? err.message : "Move failed",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function unassignFromBox(item: DrawerItem) {
+    setBusyId(item.id);
+    try {
+      await api.post("/api/items/move", { itemId: item.id, boxId: null, drawerId: null, binId: null });
+      onMovedOut(item.id);
+      toast.success(`${item.name} removed from the box`);
+    } catch (err) {
+      toast.error({
+        title: "Could not unassign",
+        description: err instanceof ApiError ? err.message : "Move failed",
+      });
     } finally {
       setBusyId(null);
     }
@@ -210,17 +237,31 @@ export function DrawerItemsList({
                   </TableCell>
                   <TableCell>
                     {canReorganize && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                        onClick={() => moveOut(item)}
-                        disabled={busy}
-                        title="Move out of drawer"
-                        aria-label="Move out of drawer"
-                      >
-                        <LogOut className="h-4 w-4" />
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            disabled={busy}
+                            aria-label="Item actions"
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => unassignFromDrawer(item)}>
+                            <FolderOutput /> Unassign from drawer
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => setAssignItem(item)}>
+                            <FolderInput /> Assign to other box…
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem destructive onClick={() => unassignFromBox(item)}>
+                            <PackageX /> Unassign from box
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     )}
                   </TableCell>
                 </TableRow>
@@ -229,6 +270,20 @@ export function DrawerItemsList({
           </TableBody>
         </Table>
       </div>
+
+      {assignItem && (
+        <AssignToBoxDialog
+          open={assignItem !== null}
+          onOpenChange={(o) => !o && setAssignItem(null)}
+          itemId={assignItem.id}
+          itemName={assignItem.name}
+          onAssigned={() => {
+            const id = assignItem.id;
+            setAssignItem(null);
+            onMovedOut(id);
+          }}
+        />
+      )}
     </div>
   );
 }

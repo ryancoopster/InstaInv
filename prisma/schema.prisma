@@ -177,6 +177,7 @@ model Box {
   updatedAt   DateTime @updatedAt
 
   drawers Drawer[]
+  items   Item[]
 }
 
 model Drawer {
@@ -254,7 +255,10 @@ model Item {
   // Values for the category's custom fields, keyed by CustomFieldDef.key.
   customValues    Json     @default("{}")
 
-  // Physical location.
+  // Physical location. An item belongs to at most one box, optionally one drawer
+  // (and bin) within it. boxId lets an item be "in a box but not yet in a drawer".
+  boxId           String?
+  box             Box?     @relation(fields: [boxId], references: [id], onDelete: SetNull)
   drawerId        String?
   drawer          Drawer?  @relation(fields: [drawerId], references: [id], onDelete: SetNull)
   binId           String?
@@ -276,6 +280,7 @@ model Item {
   purchases       Purchase[]
 
   @@index([categoryId])
+  @@index([boxId])
   @@index([drawerId])
   @@index([binId])
   @@index([supplierId])

@@ -9,11 +9,13 @@ interface BinChipProps {
   item: DrawerItem;
   draggable: boolean;
   onClick?: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }
 
 // A small chip representing an item that lives in a bin. In reorganize mode it's
 // draggable so the user can move it to another bin / the unassigned tray.
-export function BinChip({ item, draggable, onClick }: BinChipProps) {
+// Right-click opens an unassign/assign menu (handled by the parent).
+export function BinChip({ item, draggable, onClick, onContextMenu }: BinChipProps) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `item:${item.id}`,
     data: { itemId: item.id },
@@ -41,6 +43,7 @@ export function BinChip({ item, draggable, onClick }: BinChipProps) {
         e.stopPropagation();
         onClick?.();
       }}
+      onContextMenu={onContextMenu}
       {...(draggable ? { ...attributes, ...listeners } : {})}
       title={`${item.name} · ${item.quantity}${item.unit ? " " + item.unit : ""}`}
     >

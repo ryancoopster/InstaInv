@@ -20,6 +20,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
 import { BinChip } from "./BinChip";
+import { AssignToBoxDialog } from "./AssignToBoxDialog";
 import { COLOR_SWATCHES, type BinDetail, type DrawerItem } from "./types";
 
 interface VirtualDrawerProps {
@@ -66,6 +67,8 @@ export function VirtualDrawer({
 }: VirtualDrawerProps) {
   const [editBins, setEditBins] = React.useState(false);
   const [activeItem, setActiveItem] = React.useState<DrawerItem | null>(null);
+  const [ctx, setCtx] = React.useState<{ item: DrawerItem; x: number; y: number } | null>(null);
+  const [assignItem, setAssignItem] = React.useState<DrawerItem | null>(null);
 
   // Local grid size so we can auto-grow it (kept in sync with props).
   const [rows, setRows] = React.useState(binRows);
@@ -146,6 +149,22 @@ export function VirtualDrawer({
         description: err instanceof ApiError ? err.message : "Move failed",
       });
       setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, binId: current.binId } : i)));
+    }
+  }
+
+  async function relocateOut(itemId: string, body: Record<string, unknown>, msg: string) {
+    const snapshot = items;
+    setItems((prev) => prev.filter((i) => i.id !== itemId));
+    try {
+      await api.post("/api/items/move", { itemId, ...body });
+      toast.success(msg);
+      onChanged();
+    } catch (err) {
+      setItems(() => snapshot);
+      toast.error({
+        title: "Could not move item",
+        description: err instanceof ApiError ? err.message : "Move failed",
+      });
     }
   }
 
@@ -406,12 +425,23 @@ export function VirtualDrawer({
                 onMoveHandle={(e) => beginBinDrag(e, bin, "move")}
                 onResizeHandle={(e) => beginBinDrag(e, bin, "resize")}
                 onDelete={() => deleteBin(bin)}
+                onItemContextMenu={(item, e) => {
+                  e.preventDefault();
+                  setCtx({ item, x: e.clientX, y: e.clientY });
+                }}
               />
             );
           })}
         </div>
 
-        <UnassignedTray items={unassigned} dragEnabled={dragEnabled} />
+        <UnassignedTray
+          items={unassigned}
+          dragEnabled={dragEnabled}
+          onItemContextMenu={(item, e) => {
+            e.preventDefault();
+            setCtx({ item, x: e.clientX, y: e.clientY });
+          }}
+        />
 
         <DragOverlay>
           {activeItem ? (
@@ -422,7 +452,90 @@ export function VirtualDrawer({
           ) : null}
         </DragOverlay>
       </DndContext>
+
+      {/* Right-click item context menu */}
+      {ctx && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setCtx(null)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setCtx(null);
+            }}
+          />
+          <div
+            className="fixed z-50 min-w-[12rem] rounded-md border border-border bg-popover p-1 text-sm text-popover-foreground shadow-lg"
+            style={{ top: ctx.y, left: ctx.x }}
+          >
+            <CtxButton
+              label="Unassign from drawer"
+              onClick={() => {
+                relocateOut(ctx.item.id, { drawerId: null, binId: null }, `${ctx.item.name} removed from the drawer`);
+                setCtx(null);
+              }}
+            />
+            <CtxButton
+              label="Assign to other box…"
+              onClick={() => {
+                setAssignItem(ctx.item);
+                setCtx(null);
+              }}
+            />
+            <div className="my-1 h-px bg-border" />
+            <CtxButton
+              label="Unassign from box"
+              destructive
+              onClick={() => {
+                relocateOut(
+                  ctx.item.id,
+                  { boxId: null, drawerId: null, binId: null },
+                  `${ctx.item.name} removed from the box`,
+                );
+                setCtx(null);
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {assignItem && (
+        <AssignToBoxDialog
+          open={assignItem !== null}
+          onOpenChange={(o) => !o && setAssignItem(null)}
+          itemId={assignItem.id}
+          itemName={assignItem.name}
+          onAssigned={() => {
+            setItems((prev) => prev.filter((i) => i.id !== assignItem.id));
+            setAssignItem(null);
+            onChanged();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+function CtxButton({
+  label,
+  onClick,
+  destructive,
+}: {
+  label: string;
+  onClick: () => void;
+  destructive?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
+        destructive && "text-destructive hover:bg-destructive/10 hover:text-destructive",
+      )}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -438,6 +551,7 @@ function BinCell({
   onMoveHandle,
   onResizeHandle,
   onDelete,
+  onItemContextMenu,
 }: {
   bin: BinDetail;
   items: DrawerItem[];
@@ -450,6 +564,7 @@ function BinCell({
   onMoveHandle: (e: React.PointerEvent) => void;
   onResizeHandle: (e: React.PointerEvent) => void;
   onDelete: () => void;
+  onItemContextMenu: (item: DrawerItem, e: React.MouseEvent) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: binDrop(bin.id) });
   const [nameDraft, setNameDraft] = React.useState(bin.name ?? "");
@@ -540,7 +655,14 @@ function BinCell({
         {items.length === 0 ? (
           <span className="text-[11px] italic text-muted-foreground">Empty</span>
         ) : (
-          items.map((item) => <BinChip key={item.id} item={item} draggable={dragEnabled} />)
+          items.map((item) => (
+            <BinChip
+              key={item.id}
+              item={item}
+              draggable={dragEnabled}
+              onContextMenu={(e) => onItemContextMenu(item, e)}
+            />
+          ))
         )}
       </div>
 
@@ -562,7 +684,15 @@ function BinCell({
   );
 }
 
-function UnassignedTray({ items, dragEnabled }: { items: DrawerItem[]; dragEnabled: boolean }) {
+function UnassignedTray({
+  items,
+  dragEnabled,
+  onItemContextMenu,
+}: {
+  items: DrawerItem[];
+  dragEnabled: boolean;
+  onItemContextMenu: (item: DrawerItem, e: React.MouseEvent) => void;
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: `bin:${UNASSIGNED}` });
   return (
     <div
@@ -581,7 +711,14 @@ function UnassignedTray({ items, dragEnabled }: { items: DrawerItem[]; dragEnabl
             {dragEnabled ? "Drag items here to remove them from a bin." : "None."}
           </span>
         ) : (
-          items.map((item) => <BinChip key={item.id} item={item} draggable={dragEnabled} />)
+          items.map((item) => (
+            <BinChip
+              key={item.id}
+              item={item}
+              draggable={dragEnabled}
+              onContextMenu={(e) => onItemContextMenu(item, e)}
+            />
+          ))
         )}
       </div>
     </div>
