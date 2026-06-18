@@ -324,3 +324,22 @@ export async function renderLabelPdf(input: RenderInput): Promise<Buffer> {
   const bytes = await pdf.save();
   return Buffer.from(bytes);
 }
+
+// ---------------------------------------------------------------------------
+// Merge several single-label PDFs into one multi-page document (one label per
+// page). Used by the bulk "Print labels" flow so a whole selection comes back
+// as a single printable PDF.
+// ---------------------------------------------------------------------------
+
+export async function mergeLabelPdfs(buffers: Buffer[]): Promise<Buffer> {
+  if (buffers.length === 0) throw new Error("No labels to merge");
+  if (buffers.length === 1) return buffers[0];
+
+  const out = await PDFDocument.create();
+  for (const buf of buffers) {
+    const src = await PDFDocument.load(buf);
+    const pages = await out.copyPages(src, src.getPageIndices());
+    for (const page of pages) out.addPage(page);
+  }
+  return Buffer.from(await out.save());
+}

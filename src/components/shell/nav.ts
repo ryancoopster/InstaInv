@@ -8,6 +8,7 @@ import {
   ShoppingCart,
   BarChart3,
   Tag,
+  Printer,
   ScanLine,
   Users,
   ShieldCheck,
@@ -45,6 +46,7 @@ export const NAV_ITEMS: NavItem[] = [
   // --- Tools ---
   { label: "Reports", href: "/reports", icon: BarChart3, permission: "reports.view", group: "Tools" },
   { label: "Labels", href: "/labels", icon: Tag, permission: "labels.view", group: "Tools" },
+  { label: "Print Labels", href: "/print-labels", icon: Printer, permission: "labels.print", group: "Tools" },
   { label: "Scan / Checklists", href: "/scan", icon: ScanLine, permission: "ocr.scan", group: "Tools" },
   { label: "Mobile View", href: "/m", icon: Smartphone, group: "Tools" },
 

@@ -228,6 +228,31 @@ async function main() {
     });
   }
 
+  const itemLabelExists = await prisma.labelTemplate.findFirst({ where: { name: "Default Item Label" } });
+  if (!itemLabelExists) {
+    await prisma.labelTemplate.create({
+      data: {
+        name: "Default Item Label",
+        target: "ITEM",
+        widthMm: 62,
+        heightMm: 29,
+        tapeName: "Brother DK-1209 29x62",
+        isDefault: true,
+        content: {
+          dpi: 300,
+          background: "#ffffff",
+          elements: [
+            { id: "qr", type: "qrcode", x: 2, y: 2, w: 25, h: 25, binding: "item.url" },
+            { id: "pn", type: "text", x: 2, y: 27, w: 25, h: 5, text: "{{item.partNumber}}", fontSize: 7, align: "center" },
+            { id: "name", type: "text", x: 30, y: 2, w: 30, h: 12, text: "{{item.name}}", fontSize: 10, bold: true, align: "left" },
+            { id: "detail", type: "text", x: 30, y: 15, w: 30, h: 6, text: "{{item.custom.thread_size}} {{item.custom.length}}", fontSize: 8, align: "left" },
+            { id: "loc", type: "text", x: 30, y: 22, w: 30, h: 5, text: "{{box.name}} {{drawer.label}}", fontSize: 7, align: "left" },
+          ],
+        },
+      },
+    });
+  }
+
   console.log(`Done. Admin login: ${adminEmail} / ${adminPassword}`);
 }
 
