@@ -108,9 +108,11 @@ function renderElementSvg(
       const weight = el.bold ? "bold" : "normal";
       const style = el.italic ? "italic" : "normal";
       const color = el.color || "#000000";
+      const deco = el.underline ? ` text-decoration="underline"` : "";
+      const ls = el.letterSpacing ? ` letter-spacing="${px(el.letterSpacing / 2.83465)}"` : "";
       // baseline roughly centred in the box
       const ty = y + Math.min(h, fs * 1.2) * 0.5 + fs * 0.35;
-      return `<text x="${tx}" y="${ty}" font-family="${esc(fontFamily(el))}" font-size="${fs}" font-weight="${weight}" font-style="${style}" fill="${esc(color)}" text-anchor="${anchor}"${transform}>${esc(text)}</text>`;
+      return `<text x="${tx}" y="${ty}" font-family="${esc(fontFamily(el))}" font-size="${fs}" font-weight="${weight}" font-style="${style}" fill="${esc(color)}" text-anchor="${anchor}"${deco}${ls}${transform}>${esc(text)}</text>`;
     }
   }
 }

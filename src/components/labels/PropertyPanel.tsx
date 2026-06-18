@@ -183,13 +183,36 @@ export function PropertyPanel({
               ))}
             </Select>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex flex-wrap items-center gap-4">
             <label className="flex items-center gap-2 text-sm">
               <Switch checked={!!el.bold} onCheckedChange={(v) => { set({ bold: v }); onCommit(); }} /> Bold
             </label>
             <label className="flex items-center gap-2 text-sm">
               <Switch checked={!!el.italic} onCheckedChange={(v) => { set({ italic: v }); onCommit(); }} /> Italic
             </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={!!el.underline} onCheckedChange={(v) => { set({ underline: v }); onCommit(); }} /> Underline
+            </label>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Vertical align</Label>
+            <Select className="h-8" value={el.valign || "top"} onChange={(e) => { set({ valign: e.target.value as any }); onCommit(); }}>
+              <option value="top">Top</option>
+              <option value="middle">Middle</option>
+              <option value="bottom">Bottom</option>
+            </Select>
+          </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={el.wrap !== false} onCheckedChange={(v) => { set({ wrap: v }); onCommit(); }} /> Wrap
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Switch checked={!!el.autoFit} onCheckedChange={(v) => { set({ autoFit: v }); onCommit(); }} /> Auto-fit
+            </label>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <NumField label="Line height" value={el.lineHeight ?? 1.18} onChange={(v) => set({ lineHeight: Math.max(0.5, v) })} step={0.05} min={0.5} />
+            <NumField label="Tracking (pt)" value={el.letterSpacing ?? 0} onChange={(v) => set({ letterSpacing: v })} step={0.5} />
           </div>
           <ColorField label="Color" value={el.color || "#000000"} onChange={(v) => set({ color: v })} onCommit={onCommit} />
         </section>

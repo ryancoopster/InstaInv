@@ -137,54 +137,83 @@ function drawWrappedText(
   font: PDFFont,
   pageHeightPt: number,
 ) {
-  const sizePt = el.fontSize ?? 10;
   const xPt = mmToPt(el.x);
   const yTopPt = mmToPt(el.y);
   const wPt = mmToPt(el.w);
   const hPt = mmToPt(el.h);
   const color = hexToRgb(el.color, [0, 0, 0]);
   const align = el.align || "left";
+  const wrap = el.wrap !== false;
+  const lhMult = el.lineHeight ?? 1.18;
 
-  // Greedy word wrap to the box width.
-  const lines: string[] = [];
-  const paragraphs = value.split(/\r?\n/);
-  for (const para of paragraphs) {
-    const words = para.split(/\s+/).filter(Boolean);
-    if (words.length === 0) {
-      lines.push("");
-      continue;
-    }
-    let line = "";
-    for (const word of words) {
-      const trial = line ? `${line} ${word}` : word;
-      const width = safeWidth(font, trial, sizePt);
-      if (width > wPt && line) {
-        lines.push(line);
-        line = word;
-      } else {
-        line = trial;
+  function layout(sizePt: number): string[] {
+    const paragraphs = value.split(/\r?\n/);
+    if (!wrap) return paragraphs;
+    const out: string[] = [];
+    for (const para of paragraphs) {
+      const words = para.split(/\s+/).filter(Boolean);
+      if (words.length === 0) {
+        out.push("");
+        continue;
       }
+      let line = "";
+      for (const word of words) {
+        const trial = line ? `${line} ${word}` : word;
+        if (safeWidth(font, trial, sizePt) > wPt && line) {
+          out.push(line);
+          line = word;
+        } else {
+          line = trial;
+        }
+      }
+      if (line) out.push(line);
     }
-    if (line) lines.push(line);
+    return out;
   }
 
-  const lineHeight = sizePt * 1.18;
-  let cursorY = yTopPt + sizePt; // baseline of first line
+  let sizePt = el.fontSize ?? 10;
+  let lines = layout(sizePt);
+  if (el.autoFit) {
+    while (sizePt > 3) {
+      lines = layout(sizePt);
+      const totalH = lines.length * sizePt * lhMult;
+      const widest = Math.max(0, ...lines.map((l) => safeWidth(font, l, sizePt)));
+      if (totalH <= hPt && (wrap || widest <= wPt)) break;
+      sizePt -= 0.5;
+    }
+  }
+
+  const lineHeight = sizePt * lhMult;
+  const totalH = lines.length * lineHeight;
+  let top = yTopPt;
+  if (el.valign === "middle") top = yTopPt + (hPt - totalH) / 2;
+  else if (el.valign === "bottom") top = yTopPt + (hPt - totalH);
+
+  let cursorTop = top;
   for (const line of lines) {
-    if (cursorY - yTopPt > hPt + sizePt) break; // overflow guard
+    const baseline = cursorTop + sizePt;
     const lineWidth = safeWidth(font, line, sizePt);
     let drawX = xPt;
     if (align === "center") drawX = xPt + (wPt - lineWidth) / 2;
     else if (align === "right") drawX = xPt + (wPt - lineWidth);
     page.drawText(line, {
       x: drawX,
-      y: pageHeightPt - cursorY,
+      y: pageHeightPt - baseline,
       size: sizePt,
       font,
       color,
       rotate: el.rotation ? degrees(-el.rotation) : undefined,
     });
-    cursorY += lineHeight;
+    if (el.underline && line) {
+      const uy = pageHeightPt - (baseline + sizePt * 0.12);
+      page.drawLine({
+        start: { x: drawX, y: uy },
+        end: { x: drawX + lineWidth, y: uy },
+        thickness: Math.max(0.5, sizePt * 0.06),
+        color,
+      });
+    }
+    cursorTop += lineHeight;
   }
 }
 

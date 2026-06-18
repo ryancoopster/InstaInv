@@ -35,6 +35,16 @@ function snapAxis(
   return best ? { pos: best.pos, guide: best.guide } : null;
 }
 
+// Offscreen text measurement for wrapping / auto-fit on the canvas.
+let measureCtx: CanvasRenderingContext2D | null = null;
+function measureText(text: string, fontPx: number, family: string, bold: boolean, italic: boolean): number {
+  if (typeof document === "undefined") return text.length * fontPx * 0.5;
+  if (!measureCtx) measureCtx = document.createElement("canvas").getContext("2d");
+  if (!measureCtx) return text.length * fontPx * 0.5;
+  measureCtx.font = `${italic ? "italic " : ""}${bold ? "bold " : ""}${fontPx}px ${family}`;
+  return measureCtx.measureText(text).width;
+}
+
 interface DragState {
   mode: "move" | "resize";
   handle?: HandleId;
@@ -357,23 +367,70 @@ function ElementShape({
     default: {
       const raw = el.text || "";
       const value = preview && entity ? resolveBindingString(raw, entity) : raw;
-      const fontPx = ((el.fontSize ?? 10) / 72) * 25.4 * zoom; // pt -> mm -> px at this zoom
+      const family = el.fontFamily || "Helvetica, Arial, sans-serif";
+      const bold = !!el.bold;
+      const italic = !!el.italic;
+      const wrap = el.wrap !== false;
+      const lhMult = el.lineHeight ?? 1.18;
+      const layout = (fp: number): string[] => {
+        const paras = value.split(/\r?\n/);
+        if (!wrap) return paras;
+        const out: string[] = [];
+        for (const para of paras) {
+          const words = para.split(/\s+/).filter(Boolean);
+          if (!words.length) {
+            out.push("");
+            continue;
+          }
+          let line = "";
+          for (const word of words) {
+            const trial = line ? `${line} ${word}` : word;
+            if (measureText(trial, fp, family, bold, italic) > w && line) {
+              out.push(line);
+              line = word;
+            } else line = trial;
+          }
+          if (line) out.push(line);
+        }
+        return out;
+      };
+      let fontPx = ((el.fontSize ?? 10) / 72) * 25.4 * zoom; // pt -> mm -> px
+      let lines = layout(fontPx);
+      if (el.autoFit) {
+        while (fontPx > 4) {
+          lines = layout(fontPx);
+          const totalH = lines.length * fontPx * lhMult;
+          const widest = Math.max(0, ...lines.map((l) => measureText(l, fontPx, family, bold, italic)));
+          if (totalH <= h && (wrap || widest <= w)) break;
+          fontPx -= 1;
+        }
+      }
+      const lineH = fontPx * lhMult;
+      const totalTextH = lines.length * lineH;
+      let top = y;
+      if (el.valign === "middle") top = y + (h - totalTextH) / 2;
+      else if (el.valign === "bottom") top = y + (h - totalTextH);
       const align = el.align || "left";
       const anchor = align === "center" ? "middle" : align === "right" ? "end" : "start";
       const tx = align === "center" ? cx : align === "right" ? x + w : x;
+      const lsPx = ((el.letterSpacing ?? 0) / 72) * 25.4 * zoom;
       body = (
         <text
-          x={tx}
-          y={y + Math.min(h, fontPx * 1.2) * 0.5 + fontPx * 0.32}
           fontSize={fontPx}
-          fontFamily={el.fontFamily || "Helvetica, Arial, sans-serif"}
-          fontWeight={el.bold ? "bold" : "normal"}
-          fontStyle={el.italic ? "italic" : "normal"}
+          fontFamily={family}
+          fontWeight={bold ? "bold" : "normal"}
+          fontStyle={italic ? "italic" : "normal"}
           fill={el.color || "#000000"}
           textAnchor={anchor}
+          textDecoration={el.underline ? "underline" : undefined}
+          letterSpacing={lsPx ? lsPx : undefined}
           style={{ userSelect: "none" }}
         >
-          {value || " "}
+          {(lines.length ? lines : [" "]).map((ln, i) => (
+            <tspan key={i} x={tx} y={top + fontPx * 0.82 + i * lineH}>
+              {ln || " "}
+            </tspan>
+          ))}
         </text>
       );
       break;
