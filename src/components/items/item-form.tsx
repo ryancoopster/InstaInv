@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Save, Trash2, ExternalLink } from "lucide-react";
+import { Save, Trash2, ExternalLink, X } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -415,7 +415,25 @@ export function ItemForm({
 
         <Card>
           <CardHeader>
-            <CardTitle>Location</CardTitle>
+            <div className="flex items-center justify-between gap-2">
+              <CardTitle>Location</CardTitle>
+              {(boxId || state.drawerId || state.binId) && !disabled && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-muted-foreground"
+                  onClick={() => {
+                    setBoxId("");
+                    set("drawerId", "");
+                    set("binId", "");
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                  Remove from box
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-1.5">

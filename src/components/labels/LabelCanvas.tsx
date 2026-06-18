@@ -282,7 +282,7 @@ function ElementShape({
     default: {
       const raw = el.text || "";
       const value = preview && entity ? resolveBindingString(raw, entity) : raw;
-      const fontPx = (el.fontSize ?? 10) * (zoom / (25.4 / 72)) / 72 * 25.4; // pt -> px at this zoom
+      const fontPx = ((el.fontSize ?? 10) / 72) * 25.4 * zoom; // pt -> mm -> px at this zoom
       const align = el.align || "left";
       const anchor = align === "center" ? "middle" : align === "right" ? "end" : "start";
       const tx = align === "center" ? cx : align === "right" ? x + w : x;
@@ -319,7 +319,11 @@ function ElementShape({
 
   return (
     <g transform={transform}>
-      {/* transparent hit area for moving */}
+      {body}
+      {/* Transparent hit area painted ON TOP of the body: SVG hit-testing follows
+          paint order, so this guarantees a click anywhere in the element's box
+          selects/moves it instead of being swallowed by the body shape (which
+          would bubble to the canvas background and deselect). */}
       <rect
         x={x}
         y={y}
@@ -329,7 +333,6 @@ function ElementShape({
         style={{ cursor: "move" }}
         onPointerDown={onPointerDownMove}
       />
-      {body}
       {selected && (
         <>
           <rect x={x} y={y} width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={1} strokeDasharray="3 2" pointerEvents="none" />
