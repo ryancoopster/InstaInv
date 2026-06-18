@@ -20,18 +20,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { toast } from "@/components/ui/toast";
 import { BoxFrontView } from "./BoxFrontView";
 import { DrawerListView } from "./DrawerListView";
 import { DrawerForm } from "./DrawerForm";
+import { DrawerDeleteDialog } from "./DrawerDeleteDialog";
 import type { BoxDetail, DrawerSummary } from "./types";
 
 interface BoxDetailClientProps {
@@ -88,19 +81,6 @@ export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDet
     router.push(`/boxes/${box.id}/drawers/${drawerId}`);
   }
 
-  async function confirmDelete() {
-    if (!deleting) return;
-    try {
-      await api.del(`/api/drawers/${deleting.id}`);
-      setDrawers((prev) => prev.filter((d) => d.id !== deleting.id));
-      toast.success("Drawer deleted");
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Delete failed";
-      toast.error({ title: "Could not delete", description: message });
-    } finally {
-      setDeleting(null);
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -342,25 +322,15 @@ export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDet
         onSaved={reload}
       />
 
-      <Dialog open={Boolean(deleting)} onOpenChange={(o) => !o && setDeleting(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Delete drawer</DialogTitle>
-            <DialogDescription>
-              Delete <span className="font-medium text-foreground">{deleting?.name}</span>? Its bins
-              are removed. Items inside become unassigned but are not deleted.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setDeleting(null)}>
-              Cancel
-            </Button>
-            <Button variant="destructive" onClick={confirmDelete}>
-              Delete drawer
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <DrawerDeleteDialog
+        open={Boolean(deleting)}
+        onOpenChange={(o) => !o && setDeleting(null)}
+        drawer={deleting}
+        onDeleted={(id) => {
+          setDrawers((prev) => prev.filter((d) => d.id !== id));
+          setDeleting(null);
+        }}
+      />
     </div>
   );
 }
