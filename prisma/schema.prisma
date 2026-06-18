@@ -416,10 +416,15 @@ model PendingDecisionNotification {
   decision       String // "APPROVED" | "REJECTED"
   decidedAt      DateTime     @default(now())
   sentAt         DateTime?
+  // Per-digest claim token: a worker stamps this (atomically, alongside sentAt)
+  // on the exact rows it is about to email, so a concurrent worker can never
+  // bundle the same decision into a second digest. See lib/notifications/service.
+  sentBatchId    String?
   createdAt      DateTime     @default(now())
 
   @@index([sentAt, decidedAt])
   @@index([userId])
+  @@index([sentBatchId])
 }
 
 // ---------------------------------------------------------------------------
