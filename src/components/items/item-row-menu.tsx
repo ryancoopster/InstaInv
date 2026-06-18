@@ -154,7 +154,9 @@ function ChangeLocationDialog({
   onUpdated: (item: ItemRow) => void;
 }) {
   const currentBox = boxes.find((b) => b.drawers.some((d) => d.id === item.drawerId));
-  const [boxId, setBoxId] = React.useState(currentBox?.id ?? "");
+  // DM-1: fall back to the item's own boxId so an "in box, no drawer" item shows
+  // its box selected.
+  const [boxId, setBoxId] = React.useState(currentBox?.id ?? item.boxId ?? "");
   const [drawerId, setDrawerId] = React.useState(item.drawerId ?? "");
   const [binId, setBinId] = React.useState(item.binId ?? "");
   const [saving, setSaving] = React.useState(false);
@@ -163,7 +165,7 @@ function ChangeLocationDialog({
   React.useEffect(() => {
     if (open) {
       const box = boxes.find((b) => b.drawers.some((d) => d.id === item.drawerId));
-      setBoxId(box?.id ?? "");
+      setBoxId(box?.id ?? item.boxId ?? "");
       setDrawerId(item.drawerId ?? "");
       setBinId(item.binId ?? "");
     }
@@ -176,6 +178,9 @@ function ChangeLocationDialog({
     setSaving(true);
     try {
       const updated = await api.patch<ItemRow>(`/api/items/${item.id}`, {
+        // DM-1: include the selected box so "in box, no drawer" works and boxId
+        // stays consistent with drawer/bin.
+        boxId: boxId || null,
         drawerId: drawerId || null,
         binId: binId || null,
       });

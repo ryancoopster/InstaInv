@@ -54,6 +54,13 @@ export const POST = route(async (req: Request) => {
     boxId = drawer.boxId;
     binId = data.binId === undefined ? null : data.binId; // changing drawer drops the bin
   } else {
+    // F4: an explicit non-null boxId must reference a real box; otherwise the
+    // update raises an opaque FK error (500). Mirror the bin/drawer 404 path.
+    // (data.boxId === null is the explicit-clear case and is allowed through.)
+    if (data.boxId) {
+      const box = await prisma.box.findUnique({ where: { id: data.boxId }, select: { id: true } });
+      if (!box) return fail("Box not found", 404);
+    }
     if (data.boxId !== undefined) boxId = data.boxId;
     if (data.drawerId !== undefined) drawerId = data.drawerId;
     if (data.binId !== undefined) binId = data.binId;

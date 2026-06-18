@@ -98,6 +98,7 @@ export interface ItemRow {
   categoryId: string | null;
   category: CategoryRef | null;
   customValues: Record<string, unknown>;
+  boxId: string | null;
   drawerId: string | null;
   drawer: DrawerLocation | null;
   binId: string | null;

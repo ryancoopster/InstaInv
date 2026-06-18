@@ -7,6 +7,7 @@ import { logActivity } from "@/lib/audit";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { webUrlSchema } from "@/lib/url";
+import { resolveLocation, LocationError } from "@/lib/location";
 import { itemInclude, serializeItem } from "../_serialize";
 
 export const dynamic = "force-dynamic";
@@ -19,14 +20,17 @@ const patchSchema = z.object({
   barcode: z.string().trim().optional().nullable(),
   purchaseCost: z.union([z.number(), z.string()]).optional(),
   unit: z.string().trim().optional().nullable(),
-  quantity: z.number().int().optional(),
-  desiredQuantity: z.number().int().optional(),
-  minQuantity: z.number().int().optional(),
+  // DM-3: quantities can never be negative (matches the adjust route's clamp).
+  quantity: z.number().int().min(0).optional(),
+  desiredQuantity: z.number().int().min(0).optional(),
+  minQuantity: z.number().int().min(0).optional(),
   imageUrl: z.string().trim().optional().nullable(),
   supplierId: z.string().trim().optional().nullable(),
   supplierLink: webUrlSchema.optional().nullable(),
   categoryId: z.string().trim().optional().nullable(),
   customValues: z.record(z.any()).optional(),
+  // DM-1: accept boxId so an item can be placed "in a box but not yet in a drawer".
+  boxId: z.string().trim().optional().nullable(),
   drawerId: z.string().trim().optional().nullable(),
   binId: z.string().trim().optional().nullable(),
 });
@@ -49,9 +53,28 @@ export const PATCH = route(async (req: Request, { params }: Params) => {
 
   const before = await prisma.item.findUnique({
     where: { id: params.id },
-    select: { drawerId: true },
+    select: { boxId: true, drawerId: true, binId: true },
   });
   if (!before) return fail("Item not found", 404);
+
+  // DM-1: when any location field is in the body, re-derive a consistent
+  // box/drawer/bin trio (bin->drawer->box). Absent fields fall back to the
+  // item's current value so a partial PATCH keeps the rest of the location.
+  const touchesLocation =
+    data.boxId !== undefined || data.drawerId !== undefined || data.binId !== undefined;
+  let location: { boxId: string | null; drawerId: string | null; binId: string | null } | null = null;
+  if (touchesLocation) {
+    try {
+      location = await resolveLocation({
+        boxId: data.boxId !== undefined ? data.boxId : before.boxId,
+        drawerId: data.drawerId !== undefined ? data.drawerId : before.drawerId,
+        binId: data.binId !== undefined ? data.binId : before.binId,
+      });
+    } catch (err) {
+      if (err instanceof LocationError) return fail(err.message, err.status);
+      throw err;
+    }
+  }
 
   // Global, case-insensitive part-number uniqueness (DB enforces it too).
   const pn = data.partNumber?.trim();
@@ -83,8 +106,10 @@ export const PATCH = route(async (req: Request, { params }: Params) => {
       ...(data.customValues !== undefined
         ? { customValues: data.customValues as Prisma.InputJsonValue }
         : {}),
-      ...(data.drawerId !== undefined ? { drawerId: data.drawerId || null } : {}),
-      ...(data.binId !== undefined ? { binId: data.binId || null } : {}),
+      // DM-1: write the fully-resolved trio together so boxId stays consistent.
+      ...(location
+        ? { boxId: location.boxId, drawerId: location.drawerId, binId: location.binId }
+        : {}),
     },
     include: itemInclude,
   });

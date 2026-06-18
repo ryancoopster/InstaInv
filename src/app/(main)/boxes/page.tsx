@@ -27,6 +27,10 @@ export default async function BoxesPage() {
         drawers: {
           select: { id: true, items: { select: { id: true, quantity: true } } },
         },
+        // DM-2: include items that sit directly in the box (no drawer yet) so the
+        // grid/mobile counts match the detail view's "loose items". The
+        // drawerId:null filter is essential to avoid double-counting drawer items.
+        items: { where: { drawerId: null }, select: { id: true, quantity: true } },
       },
     }),
     prisma.item.count({ where: { boxId: null } }),
@@ -39,6 +43,9 @@ export default async function BoxesPage() {
       itemCount += d.items.length;
       for (const it of d.items) pieceCount += it.quantity;
     }
+    // DM-2: add drawerless in-box items so loose items are counted too.
+    itemCount += b.items.length;
+    for (const it of b.items) pieceCount += it.quantity;
     return {
       id: b.id,
       name: b.name,

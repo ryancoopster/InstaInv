@@ -134,7 +134,9 @@ export function ItemForm({
   // Cascading location pickers.
   const selectedBox = boxes.find((b) => b.drawers.some((d) => d.id === state.drawerId));
   const drawersForBox = selectedBox?.drawers ?? [];
-  const [boxId, setBoxId] = React.useState<string>(selectedBox?.id ?? "");
+  // DM-1: prefer the box derived from the drawer, but fall back to the item's own
+  // boxId so an "in box, no drawer" item still shows its box selected.
+  const [boxId, setBoxId] = React.useState<string>(selectedBox?.id ?? source?.boxId ?? "");
   const drawers = boxes.find((b) => b.id === boxId)?.drawers ?? [];
   const binsForDrawer = drawers.find((d) => d.id === state.drawerId)?.bins ?? [];
 
@@ -160,6 +162,9 @@ export function ItemForm({
         supplierId: state.supplierId || null,
         supplierLink: state.supplierLink || null,
         categoryId: state.categoryId || null,
+        // DM-1: send the selected box so the "in box, no drawer" case persists
+        // and boxId stays consistent with drawer/bin.
+        boxId: boxId || null,
         drawerId: state.drawerId || null,
         binId: state.binId || null,
         customValues: state.customValues,
@@ -304,6 +309,7 @@ export function ItemForm({
               <Input
                 id="quantity"
                 type="number"
+                min="0"
                 value={state.quantity}
                 disabled={disabled}
                 onChange={(e) => set("quantity", Number(e.target.value))}
@@ -314,6 +320,7 @@ export function ItemForm({
               <Input
                 id="desiredQuantity"
                 type="number"
+                min="0"
                 value={state.desiredQuantity}
                 disabled={disabled}
                 onChange={(e) => set("desiredQuantity", Number(e.target.value))}
@@ -324,6 +331,7 @@ export function ItemForm({
               <Input
                 id="minQuantity"
                 type="number"
+                min="0"
                 value={state.minQuantity}
                 disabled={disabled}
                 onChange={(e) => set("minQuantity", Number(e.target.value))}

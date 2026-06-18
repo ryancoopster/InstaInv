@@ -34,22 +34,18 @@ export default async function MobileHomePage() {
     },
   });
 
-  // Item totals per box (across the box's drawers) for a quick at-a-glance count.
+  // Item totals per box for a quick at-a-glance count. DM-2: group by the
+  // denormalized boxId so items that live in a box but not yet in a drawer are
+  // included (grouping by drawerId alone undercounts them, mismatching the box page).
   const itemCounts = await prisma.item.groupBy({
-    by: ["drawerId"],
+    by: ["boxId"],
     _count: { _all: true },
-    where: { drawerId: { not: null } },
+    where: { boxId: { not: null } },
   });
-  const drawerToBox = new Map(
-    (
-      await prisma.drawer.findMany({ select: { id: true, boxId: true } })
-    ).map((d) => [d.id, d.boxId]),
-  );
   const boxItemCount = new Map<string, number>();
   for (const row of itemCounts) {
-    const boxId = row.drawerId ? drawerToBox.get(row.drawerId) : undefined;
-    if (!boxId) continue;
-    boxItemCount.set(boxId, (boxItemCount.get(boxId) ?? 0) + row._count._all);
+    if (!row.boxId) continue;
+    boxItemCount.set(row.boxId, row._count._all);
   }
 
   return (

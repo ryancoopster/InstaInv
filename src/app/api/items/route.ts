@@ -6,6 +6,7 @@ import { logActivity } from "@/lib/audit";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { webUrlSchema } from "@/lib/url";
+import { resolveLocation, LocationError } from "@/lib/location";
 import { itemInclude, serializeItem } from "./_serialize";
 
 export const dynamic = "force-dynamic";
@@ -18,14 +19,17 @@ const createSchema = z.object({
   barcode: z.string().trim().optional().nullable(),
   purchaseCost: z.union([z.number(), z.string()]).optional(),
   unit: z.string().trim().optional().nullable(),
-  quantity: z.number().int().optional(),
-  desiredQuantity: z.number().int().optional(),
-  minQuantity: z.number().int().optional(),
+  // DM-3: quantities can never be negative (matches the adjust route's clamp).
+  quantity: z.number().int().min(0).optional(),
+  desiredQuantity: z.number().int().min(0).optional(),
+  minQuantity: z.number().int().min(0).optional(),
   imageUrl: z.string().trim().optional().nullable(),
   supplierId: z.string().trim().optional().nullable(),
   supplierLink: webUrlSchema.optional().nullable(),
   categoryId: z.string().trim().optional().nullable(),
   customValues: z.record(z.any()).optional(),
+  // DM-1: accept boxId so an item can be placed "in a box but not yet in a drawer".
+  boxId: z.string().trim().optional().nullable(),
   drawerId: z.string().trim().optional().nullable(),
   binId: z.string().trim().optional().nullable(),
 });
@@ -79,6 +83,20 @@ export const POST = route(async (req: Request) => {
     if (dupe) return fail(`Part number "${pn}" is already used by "${dupe.name}"`, 409);
   }
 
+  // DM-1: derive a consistent box/drawer/bin trio (bin->drawer->box) so the
+  // denormalized boxId can't drift from drawerId/binId.
+  let location: Awaited<ReturnType<typeof resolveLocation>>;
+  try {
+    location = await resolveLocation({
+      boxId: data.boxId,
+      drawerId: data.drawerId,
+      binId: data.binId,
+    });
+  } catch (err) {
+    if (err instanceof LocationError) return fail(err.message, err.status);
+    throw err;
+  }
+
   const max = await prisma.item.aggregate({ _max: { sortOrder: true } });
 
   const item = await prisma.item.create({
@@ -98,8 +116,9 @@ export const POST = route(async (req: Request) => {
       supplierLink: data.supplierLink || null,
       categoryId: data.categoryId || null,
       customValues: (data.customValues ?? {}) as Prisma.InputJsonValue,
-      drawerId: data.drawerId || null,
-      binId: data.binId || null,
+      boxId: location.boxId,
+      drawerId: location.drawerId,
+      binId: location.binId,
       sortOrder: (max._max.sortOrder ?? 0) + 1,
     },
     include: itemInclude,
