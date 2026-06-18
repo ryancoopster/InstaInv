@@ -11,7 +11,18 @@ const SESSION_COOKIE = "instainv_session";
 // via the x-nonce header threaded through the root layout. 'strict-dynamic' lets
 // nonce'd scripts load their dependencies. style-src keeps 'unsafe-inline' — Next/
 // Tailwind emit inline styles and 'strict-dynamic' does not apply to styles.
+//
+// IMPORTANT: `next dev` relies on eval (Fast Refresh / HMR) and a websocket, which
+// the strict prod policy would block — leaving the page unstyled. So in development
+// we relax script-src to 'unsafe-eval' 'unsafe-inline' and allow ws: for HMR. The
+// strict nonce policy applies only to production builds.
+const IS_PROD = process.env.NODE_ENV === "production";
+
 function buildCsp(nonce: string): string {
+  const scriptSrc = IS_PROD
+    ? `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`
+    : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+  const connectSrc = IS_PROD ? "connect-src 'self'" : "connect-src 'self' ws: wss:";
   return [
     "default-src 'self'",
     "base-uri 'self'",
@@ -19,9 +30,9 @@ function buildCsp(nonce: string): string {
     "object-src 'none'",
     "img-src 'self' data: blob:",
     "style-src 'self' 'unsafe-inline'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    scriptSrc,
     "font-src 'self' data:",
-    "connect-src 'self'",
+    connectSrc,
     "form-action 'self'",
   ].join("; ");
 }
