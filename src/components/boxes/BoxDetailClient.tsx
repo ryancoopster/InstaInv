@@ -11,11 +11,13 @@ import {
   List,
   MapPin,
   Move,
+  Pencil,
   Plus,
 } from "lucide-react";
 import { api, ApiError } from "@/lib/api";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
@@ -44,6 +46,10 @@ type ViewMode = "front" | "list";
 export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDetailClientProps) {
   const router = useRouter();
   const [drawers, setDrawers] = React.useState<DrawerSummary[]>(box.drawers);
+  const [description, setDescription] = React.useState<string | null>(box.description);
+  const [editingDesc, setEditingDesc] = React.useState(false);
+  const [descDraft, setDescDraft] = React.useState("");
+  const [savingDesc, setSavingDesc] = React.useState(false);
   const [view, setView] = React.useState<ViewMode>("front");
   const [editLayout, setEditLayout] = React.useState(false);
   const [formOpen, setFormOpen] = React.useState(false);
@@ -53,6 +59,21 @@ export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDet
   React.useEffect(() => {
     setDrawers(box.drawers);
   }, [box.drawers]);
+
+  async function saveDescription() {
+    setSavingDesc(true);
+    try {
+      const next = descDraft.trim() || null;
+      await api.patch(`/api/boxes/${box.id}`, { description: next });
+      setDescription(next);
+      setEditingDesc(false);
+      toast.success("Description saved");
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Could not save description");
+    } finally {
+      setSavingDesc(false);
+    }
+  }
 
   async function reload() {
     try {
@@ -206,10 +227,51 @@ export function BoxDetailClient({ box, canManage, prevBoxId, nextBoxId }: BoxDet
         />
       </div>
 
-      {box.summary && (
-        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          {box.summary}
-        </p>
+      {/* Box description — user-editable, overrides the auto-generated summary. */}
+      {(description || box.summary || canManage) && (
+        <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+          {editingDesc ? (
+            <div className="space-y-2">
+              <Textarea
+                value={descDraft}
+                onChange={(e) => setDescDraft(e.target.value)}
+                placeholder="Describe this box (overrides the auto-generated summary)…"
+                rows={3}
+                autoFocus
+              />
+              <div className="flex items-center gap-2">
+                <Button size="sm" onClick={saveDescription} disabled={savingDesc}>
+                  {savingDesc ? "Saving…" : "Save"}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setEditingDesc(false)} disabled={savingDesc}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start justify-between gap-3">
+              <p className="text-sm text-muted-foreground">
+                {description || box.summary || (
+                  <span className="italic">No description yet.</span>
+                )}
+              </p>
+              {canManage && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0 text-muted-foreground"
+                  aria-label="Edit description"
+                  onClick={() => {
+                    setDescDraft(description ?? "");
+                    setEditingDesc(true);
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {editLayout && (
