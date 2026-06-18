@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 interface DropdownContextValue {
@@ -99,27 +100,56 @@ export function DropdownMenuContent({
   children,
   ...props
 }: DropdownMenuContentProps) {
-  const { open, contentRef } = useDropdownContext("DropdownMenuContent");
-  if (!open) return null;
+  const { open, contentRef, triggerRef } = useDropdownContext("DropdownMenuContent");
+  // Portaled + fixed-positioned so it's never clipped by an overflow/scroll
+  // ancestor (e.g. a scrolling table). Position is measured from the trigger.
+  const [pos, setPos] = React.useState<{ top: number; left?: number; right?: number } | null>(null);
 
-  const alignClass =
-    align === "end" ? "right-0" : align === "center" ? "left-1/2 -translate-x-1/2" : "left-0";
+  React.useLayoutEffect(() => {
+    if (!open) {
+      setPos(null);
+      return;
+    }
+    function update() {
+      const t = triggerRef.current?.getBoundingClientRect();
+      if (!t) return;
+      const top = t.bottom + sideOffset;
+      if (align === "start") setPos({ top, left: t.left });
+      else if (align === "center") setPos({ top, left: t.left + t.width / 2 });
+      else setPos({ top, right: Math.max(8, window.innerWidth - t.right) });
+    }
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open, align, sideOffset, triggerRef]);
 
-  return (
+  if (!open || !pos || typeof document === "undefined") return null;
+
+  return createPortal(
     <div
       ref={contentRef}
       role="menu"
-      style={{ marginTop: sideOffset }}
+      style={{
+        position: "fixed",
+        top: pos.top,
+        left: pos.left,
+        right: pos.right,
+        transform: align === "center" ? "translateX(-50%)" : undefined,
+      }}
       className={cn(
-        "absolute z-50 min-w-[12rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg",
+        "z-50 min-w-[12rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg",
         "animate-in fade-in-0 zoom-in-95",
-        alignClass,
         className,
       )}
       {...props}
     >
       {children}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

@@ -195,7 +195,7 @@ export function UsersManager({
           }
         />
       ) : (
-        <div className="rounded-lg border border-border">
+        <div className="overflow-auto rounded-lg border border-border max-h-[calc(100vh-12rem)]">
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
