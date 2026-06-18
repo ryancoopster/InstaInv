@@ -594,6 +594,8 @@ export function LabelDesigner({ template, customKeys: initialCustomKeys = [] }: 
               element={selected}
               target={target}
               customKeys={customKeys}
+              widthMm={widthMm}
+              heightMm={heightMm}
               onChange={(patch) => {
                 if (selected) {
                   beginEditSession();

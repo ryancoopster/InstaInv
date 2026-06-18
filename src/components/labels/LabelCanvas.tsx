@@ -11,8 +11,29 @@ import { qrDataUrl, barcodeDataUrl } from "./codes";
 // binding preview. Pointer math is done in mm so it stays resolution-independent.
 
 const HANDLE = 8; // px
+const SNAP_PX = 6; // smart-snap threshold in screen px
 
 type HandleId = "nw" | "ne" | "sw" | "se" | "e" | "w" | "n" | "s";
+
+// Snap one axis: try aligning the box's near/center/far edge to any target line
+// within the threshold; returns the adjusted position + the guide line to draw.
+function snapAxis(
+  pos: number,
+  size: number,
+  targets: number[],
+  thr: number,
+): { pos: number; guide: number } | null {
+  const offsets = [0, size / 2, size];
+  let best: { pos: number; guide: number; delta: number } | null = null;
+  for (const off of offsets) {
+    const edge = pos + off;
+    for (const t of targets) {
+      const d = Math.abs(edge - t);
+      if (d <= thr && (!best || d < best.delta)) best = { pos: t - off, guide: t, delta: d };
+    }
+  }
+  return best ? { pos: best.pos, guide: best.guide } : null;
+}
 
 interface DragState {
   mode: "move" | "resize";
@@ -98,6 +119,11 @@ export function LabelCanvas({
   const svgRef = React.useRef<SVGSVGElement>(null);
   const dragRef = React.useRef<DragState | null>(null);
   const codeImages = useCodeImages(elements, entity, preview);
+  const elementsRef = React.useRef(elements);
+  React.useEffect(() => {
+    elementsRef.current = elements;
+  }, [elements]);
+  const [guides, setGuides] = React.useState<{ vx: number[]; hy: number[] }>({ vx: [], hy: [] });
 
   const Wpx = widthMm * zoom;
   const Hpx = heightMm * zoom;
@@ -136,8 +162,29 @@ export function LabelCanvas({
       const o = drag.orig;
 
       if (drag.mode === "move") {
-        const nx = clamp(snapMm(o.x + dx), 0, widthMm - o.w);
-        const ny = clamp(snapMm(o.y + dy), 0, heightMm - o.h);
+        const rawX = clamp(o.x + dx, 0, widthMm - o.w);
+        const rawY = clamp(o.y + dy, 0, heightMm - o.h);
+        let nx = snapMm(rawX);
+        let ny = snapMm(rawY);
+        const vx: number[] = [];
+        const hy: number[] = [];
+        if (snap) {
+          const thr = SNAP_PX / zoom;
+          const others = elementsRef.current.filter((e) => e.id !== o.id && !e.hidden);
+          const xT = [0, widthMm / 2, widthMm, ...others.flatMap((e) => [e.x, e.x + e.w / 2, e.x + e.w])];
+          const yT = [0, heightMm / 2, heightMm, ...others.flatMap((e) => [e.y, e.y + e.h / 2, e.y + e.h])];
+          const sx = snapAxis(rawX, o.w, xT, thr);
+          const sy = snapAxis(rawY, o.h, yT, thr);
+          if (sx) {
+            nx = clamp(sx.pos, 0, widthMm - o.w);
+            vx.push(sx.guide);
+          }
+          if (sy) {
+            ny = clamp(sy.pos, 0, heightMm - o.h);
+            hy.push(sy.guide);
+          }
+        }
+        setGuides({ vx, hy });
         onChange(o.id, { x: nx, y: ny });
         return;
       }
@@ -166,6 +213,7 @@ export function LabelCanvas({
     function onUp() {
       if (dragRef.current) {
         dragRef.current = null;
+        setGuides({ vx: [], hy: [] });
         onCommit?.();
       }
     }
@@ -217,6 +265,14 @@ export function LabelCanvas({
           />
         );
       })}
+
+      {/* Smart-snap alignment guides */}
+      {guides.vx.map((gx, i) => (
+        <line key={`gv${i}`} x1={gx * zoom} y1={0} x2={gx * zoom} y2={Hpx} stroke="#ec4899" strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />
+      ))}
+      {guides.hy.map((gy, i) => (
+        <line key={`gh${i}`} x1={0} y1={gy * zoom} x2={Wpx} y2={gy * zoom} stroke="#ec4899" strokeWidth={1} strokeDasharray="4 3" pointerEvents="none" />
+      ))}
     </svg>
   );
 }

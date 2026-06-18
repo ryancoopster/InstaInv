@@ -1,7 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { Upload, Loader2 } from "lucide-react";
+import {
+  Upload,
+  Loader2,
+  AlignStartVertical,
+  AlignCenterVertical,
+  AlignEndVertical,
+  AlignStartHorizontal,
+  AlignCenterHorizontal,
+  AlignEndHorizontal,
+} from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,12 +58,16 @@ export function PropertyPanel({
   element,
   target,
   customKeys,
+  widthMm,
+  heightMm,
   onChange,
   onCommit,
 }: {
   element: LabelElement | null;
   target: LabelTargetKind;
   customKeys: string[];
+  widthMm: number;
+  heightMm: number;
   onChange: (patch: Partial<LabelElement>) => void;
   onCommit: () => void;
 }) {
@@ -119,6 +132,18 @@ export function PropertyPanel({
           <NumField label="Height" value={el.h} onChange={(v) => set({ h: Math.max(1, v) })} min={1} />
         </div>
         <NumField label="Rotation (°)" value={el.rotation ?? 0} onChange={(v) => set({ rotation: v })} step={1} />
+        <div className="space-y-1">
+          <Label className="text-xs">Align to label</Label>
+          <div className="flex items-center gap-0.5">
+            <AlignBtn title="Left" icon={AlignStartVertical} onClick={() => { set({ x: 0 }); onCommit(); }} />
+            <AlignBtn title="Center" icon={AlignCenterVertical} onClick={() => { set({ x: Math.round((widthMm - el.w) / 2 * 100) / 100 }); onCommit(); }} />
+            <AlignBtn title="Right" icon={AlignEndVertical} onClick={() => { set({ x: Math.round((widthMm - el.w) * 100) / 100 }); onCommit(); }} />
+            <div className="mx-1 h-5 w-px bg-border" />
+            <AlignBtn title="Top" icon={AlignStartHorizontal} onClick={() => { set({ y: 0 }); onCommit(); }} />
+            <AlignBtn title="Middle" icon={AlignCenterHorizontal} onClick={() => { set({ y: Math.round((heightMm - el.h) / 2 * 100) / 100 }); onCommit(); }} />
+            <AlignBtn title="Bottom" icon={AlignEndHorizontal} onClick={() => { set({ y: Math.round((heightMm - el.h) * 100) / 100 }); onCommit(); }} />
+          </div>
+        </div>
       </section>
 
       {/* Text */}
@@ -267,6 +292,22 @@ export function PropertyPanel({
         </section>
       )}
     </div>
+  );
+}
+
+function AlignBtn({
+  title,
+  icon: Icon,
+  onClick,
+}: {
+  title: string;
+  icon: React.ElementType;
+  onClick: () => void;
+}) {
+  return (
+    <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title={`Align ${title}`} onClick={onClick}>
+      <Icon className="h-3.5 w-3.5" />
+    </Button>
   );
 }
 
