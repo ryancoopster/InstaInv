@@ -46,7 +46,7 @@ function measureText(text: string, fontPx: number, family: string, bold: boolean
 }
 
 interface DragState {
-  mode: "move" | "resize";
+  mode: "move" | "resize" | "rotate";
   handle?: HandleId;
   startX: number; // pointer mm
   startY: number;
@@ -152,7 +152,7 @@ export function LabelCanvas({
     return { x, y };
   }
 
-  function beginDrag(e: React.PointerEvent, el: LabelElement, mode: "move" | "resize", handle?: HandleId) {
+  function beginDrag(e: React.PointerEvent, el: LabelElement, mode: "move" | "resize" | "rotate", handle?: HandleId) {
     e.stopPropagation();
     e.preventDefault();
     (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -170,6 +170,15 @@ export function LabelCanvas({
       const dx = x - drag.startX;
       const dy = y - drag.startY;
       const o = drag.orig;
+
+      if (drag.mode === "rotate") {
+        const cxmm = o.x + o.w / 2;
+        const cymm = o.y + o.h / 2;
+        let ang = (Math.atan2(x - cxmm, -(y - cymm)) * 180) / Math.PI;
+        ang = e.shiftKey ? Math.round(ang / 15) * 15 : Math.round(ang);
+        onChange(o.id, { rotation: ((ang % 360) + 360) % 360 });
+        return;
+      }
 
       if (drag.mode === "move") {
         const rawX = clamp(o.x + dx, 0, widthMm - o.w);
@@ -272,6 +281,7 @@ export function LabelCanvas({
             selected={el.id === selectedId}
             onPointerDownMove={(e) => beginDrag(e, el, "move")}
             onPointerDownResize={(e, handle) => beginDrag(e, el, "resize", handle)}
+            onPointerDownRotate={(e) => beginDrag(e, el, "rotate")}
           />
         );
       })}
@@ -300,6 +310,7 @@ function ElementShape({
   selected,
   onPointerDownMove,
   onPointerDownResize,
+  onPointerDownRotate,
 }: {
   el: LabelElement;
   zoom: number;
@@ -309,6 +320,7 @@ function ElementShape({
   selected: boolean;
   onPointerDownMove: (e: React.PointerEvent) => void;
   onPointerDownResize: (e: React.PointerEvent, handle: HandleId) => void;
+  onPointerDownRotate: (e: React.PointerEvent) => void;
 }) {
   const x = el.x * zoom;
   const y = el.y * zoom;
@@ -468,6 +480,18 @@ function ElementShape({
       {selected && (
         <>
           <rect x={x} y={y} width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={1} strokeDasharray="3 2" pointerEvents="none" />
+          {/* Rotate handle above the top-center */}
+          <line x1={cx} y1={y} x2={cx} y2={y - 16} stroke="#2563eb" strokeWidth={1} pointerEvents="none" />
+          <circle
+            cx={cx}
+            cy={y - 16}
+            r={5}
+            fill="#ffffff"
+            stroke="#2563eb"
+            strokeWidth={1}
+            style={{ cursor: "grab" }}
+            onPointerDown={onPointerDownRotate}
+          />
           {handles.map((hid) => {
             const p = handlePos[hid];
             return (
