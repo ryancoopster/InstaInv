@@ -9,9 +9,16 @@
 // NB: no `server-only` import and no Buffer use here — this module is also pulled
 // into the Edge middleware bundle, which lacks Node's Buffer.
 
+// SEC-8: the placeholder shipped in .env.example, defined ONCE here and listed in
+// FORBIDDEN_SECRETS below so the two can't silently drift. .env.example's
+// AUTH_SECRET MUST use this exact value so the fail-closed guard keeps rejecting a
+// verbatim copy of the example file. (No test runner exists yet to assert this
+// invariant automatically; keep the two in sync by hand until one is added.)
+export const EXAMPLE_PLACEHOLDER_SECRET = "change-me-to-a-long-random-string-at-least-32-chars";
+
 const FORBIDDEN_SECRETS = new Set([
   "dev-only-insecure-secret-change-me-32chars!",
-  "change-me-to-a-long-random-string-at-least-32-chars",
+  EXAMPLE_PLACEHOLDER_SECRET,
 ]);
 
 function loadSecretKey(): Uint8Array {

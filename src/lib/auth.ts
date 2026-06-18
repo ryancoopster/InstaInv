@@ -105,9 +105,23 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
   return user;
 });
 
-export async function requireUser(): Promise<SessionUser> {
+export interface RequireUserOptions {
+  // SEC-2: opt out of the central mustChangePassword gate. Only the endpoints that
+  // let a user ESCAPE the must-change state (the change-password / first-login
+  // setup handler) may set this — otherwise a forced account could deadlock
+  // itself out of the only path to clear the flag.
+  allowPasswordChange?: boolean;
+}
+
+export async function requireUser(opts: RequireUserOptions = {}): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) throw new AuthError("UNAUTHENTICATED");
+  // SEC-2: enforce the forced-password-change flag centrally at the API boundary,
+  // not only in the React layout — otherwise a valid JWT can call any permitted
+  // mutating endpoint directly (curl/fetch) before finishing required setup.
+  if (user.mustChangePassword && !opts.allowPasswordChange) {
+    throw new AuthError("PASSWORD_CHANGE_REQUIRED");
+  }
   return user;
 }
 
@@ -123,7 +137,10 @@ export async function requirePermission(key: PermissionKey): Promise<SessionUser
 }
 
 export class AuthError extends Error {
-  constructor(public code: "UNAUTHENTICATED" | "FORBIDDEN", public permission?: string) {
+  constructor(
+    public code: "UNAUTHENTICATED" | "FORBIDDEN" | "PASSWORD_CHANGE_REQUIRED",
+    public permission?: string,
+  ) {
     super(code);
     this.name = "AuthError";
   }

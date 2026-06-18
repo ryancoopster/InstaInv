@@ -4,6 +4,28 @@ import { SECRET_KEY } from "@/lib/secret";
 
 const SESSION_COOKIE = "instainv_session";
 
+// SEC-5: nonce-based Content-Security-Policy. Generated per request here so we can
+// drop 'unsafe-inline' from script-src (the weakest link for XSS containment).
+// Next 14.2 reads the nonce from the request's CSP header and propagates it to its
+// own hydration/bootstrap scripts; third-party inline scripts (next-themes) get it
+// via the x-nonce header threaded through the root layout. 'strict-dynamic' lets
+// nonce'd scripts load their dependencies. style-src keeps 'unsafe-inline' — Next/
+// Tailwind emit inline styles and 'strict-dynamic' does not apply to styles.
+function buildCsp(nonce: string): string {
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "img-src 'self' data: blob:",
+    "style-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}
+
 // Routes that never require a session. /api/pricing/cron is here because it
 // authenticates with its own PRICING_CRON_SECRET header (for external schedulers
 // that have no cookie); the route handler enforces that secret itself.
@@ -32,24 +54,39 @@ async function isAuthed(req: NextRequest): Promise<boolean> {
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // SEC-5: per-request nonce + CSP. The nonce is set on the REQUEST CSP header
+  // (so Next nonces its scripts) and exposed via x-nonce (so the root layout can
+  // pass it to next-themes); the same CSP is also written to every response.
+  const nonce = crypto.randomUUID().replace(/-/g, "");
+  const csp = buildCsp(nonce);
+
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("Content-Security-Policy", csp);
+
+  const withCsp = (res: NextResponse): NextResponse => {
+    res.headers.set("Content-Security-Policy", csp);
+    return res;
+  };
+
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
-    return NextResponse.next();
+    return withCsp(NextResponse.next({ request: { headers: requestHeaders } }));
   }
 
   const authed = await isAuthed(req);
   if (!authed) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
+      return withCsp(NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 }));
     }
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("from", pathname);
-    return NextResponse.redirect(url);
+    return withCsp(NextResponse.redirect(url));
   }
   // Forward the current path so the (main) layout can enforce per-route permissions.
-  const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-pathname", pathname);
-  return NextResponse.next({ request: { headers: requestHeaders } });
+  return withCsp(NextResponse.next({ request: { headers: requestHeaders } }));
 }
 
 export const config = {

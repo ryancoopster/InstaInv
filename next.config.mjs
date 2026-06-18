@@ -1,20 +1,7 @@
-// Content-Security-Policy. Pragmatic for Next's App Router (inline hydration
-// scripts need 'unsafe-inline'), but locks down framing, plugins and base-uri.
-const CSP = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "img-src 'self' data: blob:",
-  "style-src 'self' 'unsafe-inline'",
-  "script-src 'self' 'unsafe-inline'",
-  "font-src 'self' data:",
-  "connect-src 'self'",
-  "form-action 'self'",
-].join("; ");
-
+// SEC-5: the Content-Security-Policy is now emitted PER REQUEST from
+// src/middleware.ts so it can carry a nonce and drop 'unsafe-inline' from
+// script-src. The static, request-independent security headers stay here.
 const SECURITY_HEADERS = [
-  { key: "Content-Security-Policy", value: CSP },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

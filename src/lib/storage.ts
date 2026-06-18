@@ -26,7 +26,12 @@ export async function saveUpload(file: File, subdir = "", contentType?: string):
   const driver = process.env.STORAGE_DRIVER || "local";
   const arrayBuffer = await file.arrayBuffer();
   const buffer = Buffer.from(arrayBuffer);
-  const ext = (contentType && EXT_BY_TYPE[contentType]) || "bin";
+  // SEC-6: derive the extension strictly from a known image content type. No
+  // "bin" fallback — throw on an unknown/absent type so no present or future
+  // caller can write a non-image (e.g. .html/.svg) extension into the public
+  // static dir, which would be a same-origin stored-XSS vector under /uploads.
+  const ext = contentType ? EXT_BY_TYPE[contentType] : undefined;
+  if (!ext) throw new Error("Unsupported content type");
   const filename = randomName(ext);
 
   if (driver === "s3") {

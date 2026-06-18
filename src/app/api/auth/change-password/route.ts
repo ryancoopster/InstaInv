@@ -18,7 +18,10 @@ const Schema = z.object({
 // to set their real name + email. Clears the must-change flag, revokes other
 // sessions (tokenVersion bump) and re-issues this session's cookie.
 export const POST = route(async (req: Request) => {
-  const user = await requireUser();
+  // SEC-2: this is the endpoint that CLEARS mustChangePassword, so it must opt out
+  // of the central forced-password-change gate — otherwise a must-change account
+  // would be locked out of the only path to escape that state.
+  const user = await requireUser({ allowPasswordChange: true });
 
   const parsed = Schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

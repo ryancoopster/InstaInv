@@ -132,6 +132,13 @@ CONTRACT.md              Conventions used to build the app coherently
    `src/lib/storage.ts` (a clearly-marked TODO). Put the app behind an ALB; serve `/uploads` from S3
    + CloudFront in production.
 4. **Secrets:** `AUTH_SECRET` and DB creds via SSM/Secrets Manager.
+5. **Scaling past one instance:** the login rate-limiter and the OCR concurrency cap are in-process,
+   and the pricing-refresh + decision-digest schedulers run in-process on a timer. These assume a
+   **single long-lived instance**. If you run more than one task/replica, set
+   `PRICING_SCHEDULER_DISABLED=1` and `NOTIFICATIONS_SCHEDULER_DISABLED=1` and instead drive that work
+   from an external scheduler (e.g. EventBridge) hitting `GET /api/pricing/cron` and
+   `GET /api/notifications/cron`, authenticated with `PRICING_CRON_SECRET` / `NOTIFICATIONS_CRON_SECRET`.
+   For multi-instance rate limiting, move the limiter to a shared store (e.g. Redis).
 
 ---
 
