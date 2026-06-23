@@ -231,6 +231,22 @@ async function main() {
 
       // ---- 5. Items -----------------------------------------------------------
       let made = 0;
+      // Honor the case-insensitive unique part-number index: keep the first
+      // occurrence and null any later case-insensitive duplicate (the source sheet
+      // has a few), so the single-transaction rebuild can't abort on P2002. Mirrors
+      // the workbox importer's behavior.
+      const usedPN = new Set<string>();
+      let nulledPN = 0;
+      const uniquePartNumber = (pn: string | null): string | null => {
+        if (!pn) return null;
+        const key = pn.toLowerCase();
+        if (usedPN.has(key)) {
+          nulledPN++;
+          return null;
+        }
+        usedPN.add(key);
+        return pn;
+      };
       // Hardware
       for (let i = 0; i < hw.length; i++) {
         const r = hw[i];
@@ -256,7 +272,7 @@ async function main() {
           data: {
             name,
             description: descBits.join(" · ") || null,
-            partNumber: part || null,
+            partNumber: uniquePartNumber(part || null),
             purchaseCost: new Prisma.Decimal(perPiece(r.COST, packQty)),
             unit: "ea",
             quantity: 0,
@@ -294,7 +310,7 @@ async function main() {
           data: {
             name,
             description: str(r.Type) || null,
-            partNumber: str(r["Part #"]) || null,
+            partNumber: uniquePartNumber(str(r["Part #"]) || null),
             purchaseCost: new Prisma.Decimal(0),
             unit: "ea",
             quantity: 0,
@@ -314,6 +330,7 @@ async function main() {
         });
         made++;
       }
+      if (nulledPN) console.log(`  (${nulledPN} part numbers nulled to avoid case-insensitive duplicates)`);
       return made;
     },
     // Generous bounds: the rebuild creates hundreds of rows in one transaction.
